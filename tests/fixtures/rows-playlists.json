@@ -1,0 +1,8 @@
+{"event": "rows", "view": "playlists", "total": 2, "entries": [
+  {"kind": "playlist", "id": "pl.fix1", "name": "Fixture Playlist One", "curator": "Fixture Curator",
+   "date_added": "2024-02-02T12:00:00Z", "last_modified": "2024-06-06T12:00:00Z",
+   "artwork": "https://art.example.invalid/hhh/{w}x{h}bb.jpg", "library": true},
+  {"kind": "playlist", "id": "pl.fix2", "name": "Fixture Playlist Two", "curator": "Fixture Curator",
+   "date_added": "2022-11-20T09:00:00Z", "last_modified": "2023-03-01T09:00:00Z",
+   "artwork": null, "library": true}
+]}

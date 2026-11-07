@@ -35,60 +35,66 @@ def art_url(template, size):
 
 
 def entry_to_dict(e, art_size=300):
-    """Normalize an Entry (tagged `kind`) into a flat dict for QML models.
-    Mirrors Entry::subtitle()/page_target() in slipmat-core/src/entry.rs:44-99."""
+    """Normalize an Entry (tagged `kind`) into a flat dict for the UI.
+    Mirrors Entry::subtitle()/page_target() in slipmat-core/src/entry.rs:44-99.
+    Keeps the raw entry under "raw" and the artwork template under
+    "artworkTemplate" (resolved+cached by art.py, never fetched inline)."""
     kind = e.get("kind", "")
-    d = {"kind": kind, "raw": e, "artUrl": "", "pageKind": "", "playable": False,
-         "id": "", "catalogId": "", "title": "", "subtitle": "", "durationMs": 0,
-         "artPath": "", "favorite": False, "inLibrary": False, "library": False}
+    d = {"kind": kind, "raw": e, "artUrl": "", "artworkTemplate": "", "pageKind": "",
+         "playable": False, "id": "", "catalogId": "", "libraryId": "",
+         "title": "", "subtitle": "", "durationMs": 0, "dateAdded": "", "year": "",
+         "trackCount": 0, "curator": "", "artPath": "", "favorite": False,
+         "inLibrary": False, "library": False, "album": "", "artist": ""}
+    art = e.get("artwork")
+    if art:
+        d["artworkTemplate"] = art if isinstance(art, str) else str(art)
+        d["artUrl"] = art_url(d["artworkTemplate"], art_size)
     if kind == "song":
         t = e
         d["id"] = t.get("id", "")
         d["catalogId"] = t.get("catalog_id") or ""
+        d["libraryId"] = t.get("library_id") or ""
         d["title"] = t.get("title", "")
         artist, album = t.get("artist", ""), t.get("album", "")
+        d["artist"], d["album"] = artist, album
         if artist and album:
             d["subtitle"] = f"{artist} — {album}"
         else:
             d["subtitle"] = artist or album
         d["durationMs"] = t.get("duration_ms", 0)
+        d["dateAdded"] = t.get("date_added", "")     # empty for library songs (Apple does not send it)
+        d["year"] = t.get("year", "")
         d["favorite"] = bool(t.get("favorite", False))
         d["inLibrary"] = bool(t.get("in_library", False))
         d["playable"] = bool(t.get("catalog_id"))
-        art = t.get("artwork")
-        if art:
-            d["artUrl"] = art_url(art if isinstance(art, str) else str(art), art_size)
+        d["pageKind"] = "song"
     elif kind == "album":
         a = e
         d["id"] = a.get("id", "")
         d["title"] = a.get("name", "")
         artist, year = a.get("artist", ""), a.get("year", "")
+        d["artist"], d["year"] = artist, year
         d["subtitle"] = f"{artist} · {year}" if artist and year else (artist or year)
+        d["dateAdded"] = a.get("date_added", "")
+        d["trackCount"] = a.get("track_count", 0)
         d["library"] = bool(a.get("library", False))
         d["pageKind"] = "libraryAlbum" if d["library"] else "album"
-        art = a.get("artwork")
-        if art:
-            d["artUrl"] = art_url(art if isinstance(art, str) else str(art), art_size)
     elif kind == "artist":
         a = e
         d["id"] = a.get("id", "")
-        d["title"] = a.get("name", "")
-        d["subtitle"] = a.get("genres", "")
+        d["title"] = a.get("name", "")                # the artist's NAME is the main text
+        d["subtitle"] = a.get("genres", "")           # genres are secondary
         d["library"] = bool(a.get("library", False))
         d["pageKind"] = "libraryArtist" if d["library"] else "artist"
-        art = a.get("artwork")
-        if art:
-            d["artUrl"] = art_url(art if isinstance(art, str) else str(art), art_size)
     elif kind == "playlist":
         p = e
         d["id"] = p.get("id", "")
         d["title"] = p.get("name", "")
-        d["subtitle"] = p.get("curator", "")
+        d["curator"] = p.get("curator", "")
+        d["subtitle"] = d["curator"]
+        d["dateAdded"] = p.get("date_added", "")
         d["library"] = bool(p.get("library", False))
         d["pageKind"] = "libraryPlaylist" if d["library"] else "playlist"
-        art = p.get("artwork")
-        if art:
-            d["artUrl"] = art_url(art if isinstance(art, str) else str(art), art_size)
     return d
 
 

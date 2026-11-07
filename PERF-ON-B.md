@@ -67,7 +67,8 @@ sopra.
 
 Per ogni app: (a) lascia la prima schermata ferma 5 s; (b) scorri la lista
 su e giù per 10 s; (c) entra in una pagina e torna indietro (turnstile) 3
-volte; (d) su Zune HD apri la strip/quickplay (now playing) se presente.
+volte; (d) su Zune HD (stage 3: si apre sul pivot music) apri "now playing"
+dalla app bar e torna indietro.
 Poi:
 
 ```sh
@@ -87,8 +88,8 @@ a occhio (1 = a scatti, 5 = fluido).
 | zuneref | ferma | | | | | | | | | | | | |
 | zuneref | scroll | | | | | | | | | | | | |
 | zuneref | push/pop | | | | | | | | | | | | |
-| zunehd | home ferma | | | | | | | | | | | | |
-| zunehd | scroll home | | | | | | | | | | | | |
+| zunehd | pivot music ferma | | | | | | | | | | | | |
+| zunehd | scroll lista (songs) | | | | | | | | | | | | |
 | zunehd | turnstile entra/esci | | | | | | | | | | | | |
 | zunehd | now playing | | | | | | | | | | | | |
 

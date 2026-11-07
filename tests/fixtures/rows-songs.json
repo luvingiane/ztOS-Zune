@@ -1,0 +1,14 @@
+{"event": "rows", "view": "songs", "total": 3, "entries": [
+  {"kind": "song", "date_added": "", "year": "2019", "favorite": true, "in_library": true,
+   "library_id": "i.fix1", "id": "i.fix1", "catalog_id": "c.fix1", "title": "Fixture Song One",
+   "artist": "Fixture Artist A", "album": "Fixture Album A", "duration_ms": 174000,
+   "track_number": 1, "artwork": "https://art.example.invalid/aaa/{w}x{h}bb.jpg"},
+  {"kind": "song", "date_added": "", "year": "2021", "favorite": false, "in_library": true,
+   "library_id": "i.fix2", "id": "i.fix2", "catalog_id": null, "title": "Fixture Song Two",
+   "artist": "Fixture Artist B", "album": "Fixture Album B", "duration_ms": 201000,
+   "track_number": 2, "artwork": "https://art.example.invalid/bbb/{w}x{h}bb.jpg"},
+  {"kind": "song", "date_added": "", "year": "", "favorite": false, "in_library": false,
+   "library_id": null, "id": "c.fix3", "catalog_id": "c.fix3", "title": "Fixture Song Three",
+   "artist": "Fixture Artist C", "album": "", "duration_ms": 95000, "track_number": 1,
+   "artwork": null}
+]}

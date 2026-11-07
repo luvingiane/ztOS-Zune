@@ -1,0 +1,27 @@
+{"stage": {"event": "stage", "stage": "ready"},
+ "snapshot": {"event": "snapshot", "track_id": "c.fix1", "title": "Fixture Song One",
+   "artist": "Fixture Artist A", "album": "Fixture Album A",
+   "art_path": "/nonexistent/fixture-art.jpg", "position_ms": 4000, "duration_ms": 174000,
+   "playing": true, "busy": false, "volume": 0.8, "shuffle": false, "repeat": "none",
+   "can_next": true, "can_previous": false},
+ "queue": {"event": "queue", "position": 0, "items": [
+   {"id": "c.fix1", "title": "Fixture Song One", "artist": "Fixture Artist A",
+    "album": "Fixture Album A", "duration_ms": 174000},
+   {"id": "i.fix2", "title": "Fixture Song Two", "artist": "Fixture Artist B",
+    "album": "Fixture Album B", "duration_ms": 201000}]},
+ "results": {"event": "results", "query": "fixture", "offset": 0, "more": false, "entries": [
+   {"kind": "song", "date_added": "", "year": "2019", "favorite": false, "in_library": true,
+    "library_id": "i.fix1", "id": "i.fix1", "catalog_id": "c.fix1", "title": "Fixture Song One",
+    "artist": "Fixture Artist A", "album": "Fixture Album A", "duration_ms": 174000,
+    "track_number": 1, "artwork": "https://art.example.invalid/aaa/{w}x{h}bb.jpg"}]},
+ "page": {"event": "page", "kind": "libraryAlbum", "id": "al.fix1",
+   "header": {"kind": "album", "id": "al.fix1", "date_added": "2024-05-01T10:00:00Z",
+     "name": "Fixture Album A", "artist": "Fixture Artist A",
+     "artwork": "https://art.example.invalid/ccc/{w}x{h}bb.jpg", "year": "2019",
+     "track_count": 6, "library": true},
+   "entries": [
+     {"kind": "song", "date_added": "", "year": "2019", "favorite": true, "in_library": true,
+      "library_id": "i.fix1", "id": "i.fix1", "catalog_id": "c.fix1", "title": "Fixture Song One",
+      "artist": "Fixture Artist A", "album": "Fixture Album A", "duration_ms": 174000,
+      "track_number": 1, "artwork": "https://art.example.invalid/aaa/{w}x{h}bb.jpg"}]}
+}

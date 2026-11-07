@@ -1,0 +1,8 @@
+{"event": "rows", "view": "artists", "total": 3, "entries": [
+  {"kind": "artist", "id": "ar.fix1", "name": "Fixture Artist A",
+   "artwork": "https://art.example.invalid/fff/{w}x{h}bb.jpg", "genres": "Fixture Pop", "library": true},
+  {"kind": "artist", "id": "ar.fix2", "name": "Fixture Artist B", "artwork": null,
+   "genres": "Fixture Rock, Fixture Indie", "library": true},
+  {"kind": "artist", "id": "c.ar.fix3", "name": "Fixture Artist C (catalog)",
+   "artwork": "https://art.example.invalid/ggg/{w}x{h}bb.jpg", "genres": "", "library": false}
+]}

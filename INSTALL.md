@@ -77,6 +77,7 @@ ZUNE_PERF=1 ZTOS_SHOT_AFTER=9000 ZUNE_NAV=music,songs ZUNE_SCROLL=1 \
 python3 .sdk/ztos/sdk/bin/ztos-sdk build                                     # -> dist/dev.oneplus2.zunehd
 (cd ref && python3 ../.sdk/ztos/sdk/bin/ztos-sdk build)                      # -> ref/dist/dev.oneplus2.zuneref
 env -i HOME=$HOME PATH=/usr/bin:/bin python3 tests/compare.py                # confronto affiancato (soglie in ACCEPTANCE.md)
+env -i HOME=$HOME PATH=/usr/bin:/bin python3 tests/test_client.py             # test client vs slipmatd finto (fixture anonimizzate in tests/fixtures/)
 ```
 
 La libreria nativa aarch64 (`sdk/native/prebuilt/aarch64/libztos-render.so`)

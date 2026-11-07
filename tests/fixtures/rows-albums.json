@@ -1,0 +1,11 @@
+{"event": "rows", "view": "albums", "total": 3, "entries": [
+  {"kind": "album", "id": "al.fix1", "date_added": "2024-05-01T10:00:00Z", "name": "Fixture Album A",
+   "artist": "Fixture Artist A", "artwork": "https://art.example.invalid/ccc/{w}x{h}bb.jpg",
+   "year": "2019", "track_count": 6, "library": true},
+  {"kind": "album", "id": "al.fix2", "date_added": "2023-01-15T08:30:00Z", "name": "Fixture Album B",
+   "artist": "Fixture Artist B", "artwork": "https://art.example.invalid/ddd/{w}x{h}bb.jpg",
+   "year": "2021", "track_count": 5, "library": true},
+  {"kind": "album", "id": "c.al.fix3", "date_added": "", "name": "Fixture Album C (catalog)",
+   "artist": "Fixture Artist C", "artwork": "https://art.example.invalid/eee/{w}x{h}bb.jpg",
+   "year": "2024", "track_count": 10, "library": false}
+]}
