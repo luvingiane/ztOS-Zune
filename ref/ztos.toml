@@ -1,0 +1,15 @@
+# What ztos-sdk needs to know about the app.
+[app]
+id = "dev.oneplus2.zuneref"           # the minimal reference app, for perf comparison
+name = "Zune Ref"
+caps = "REF"
+version = "0.1.0"
+entry = "main.py"
+icon = "icon.svg"
+description = "Minimal ztOS SDK app (a scrolling list + a pushed page) with the same ZUNE_PERF=1 counters as Zune HD, to tell 'my content' from 'the SDK/phone pipeline' on the phone"
+requires = []
+performance = "normal"
+
+[build]
+exclude = ["dist/**"]
+dependencies = []

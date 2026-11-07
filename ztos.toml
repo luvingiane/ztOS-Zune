@@ -15,7 +15,8 @@ requires = []
 performance = "normal"
 
 [build]
-exclude = [".sdk/**", "docs/**", "tests/**", "slipmat/**", "dist/**"]
+exclude = [".sdk/**", "docs/**", "tests/**", "ref/**", "dist/**"]
+# slipmat/ipc.py IS bundled (the slipmatd client, wired in client.py in tapa 2)
 # what goes into the app (paths in this folder); these are the defaults:
 # include = ["**/*.py", "**/*.ui", "**/*.svg", "**/*.png", "**/*.json", ...]
 # exclude = []
