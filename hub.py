@@ -8,6 +8,8 @@ its own sort (SortBy::for_view, slipmat-core/src/sort.rs), chosen from the
 app bar's sort button, direction included, remembered between sessions.
 """
 import ztos
+import screens
+import player
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QFontMetricsF, QPainter
 
@@ -105,18 +107,18 @@ class SongsPage(ListPage):
         self._app = app
 
     def build(self, rows):
-        import screens
+        import player
         for s in rows:
             self.add(Row(rtitle(s), s.get("subtitle", ""), s.get("durationMs", 0),
                          on_tap=lambda s=s: self._play(s),
                          on_hold=lambda s=s: self._menu(s)))
 
     def _play(self, s):
-        import screens
+        import player
         ztos.haptic("tap")
         ids = [s.get("catalogId") or s.get("id", "")]
         backend.play_ids(ids, 0)
-        self._app.push(screens.NowPlaying(self._app))
+        self._app.push(player.NowPlaying(self._app))
 
     def _menu(self, s):
         sid = s.get("catalogId") or s.get("id", "")
@@ -239,7 +241,7 @@ class MusicHub(ztos.Pivot):
     the app (it is the only page on the stack)."""
 
     def __init__(self, app):
-        import screens
+        import player
         self._app = app
         self._pages = [ArtistsPage(app), AlbumsPage(app), SongsPage(app),
                        PlaylistsPage(app), screens.SettingsPage()]
@@ -249,7 +251,7 @@ class MusicHub(ztos.Pivot):
         self.bar(self._sort_btn,
                  ztos.RoundButton("search", "search", lambda: app.push(screens.SearchPage())),
                  ztos.RoundButton("more", "queue", lambda: app.push(screens.QueuePage())),
-                 ztos.RoundButton("play", "now playing", lambda: app.push(screens.NowPlaying(app))))
+                 ztos.RoundButton("play", "now playing", lambda: app.push(player.NowPlaying(app))))
         backend.changed.connect(self._refill)
         self._sort_label(0)
 

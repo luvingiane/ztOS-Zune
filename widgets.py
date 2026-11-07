@@ -16,13 +16,14 @@ LIST_X = 17         # 14 canvas
 
 
 def cover_colors(text: str):
-    """Deterministic gradient pair from the title (no text on covers)."""
+    """Deterministic gradient pair from the title (no text on covers).
+    QColor.fromHsl is on a 0-255 scale, so lightness 150-170 is a bright cover."""
     h = 0
     for ch in text:
         h = (h * 31 + ord(ch)) & 0xFFFFFFFF
     hue = h % 360
     hue2 = (hue + 40 + (h >> 8) % 80) % 360
-    return QColor.fromHsl(hue, 150, 72), QColor.fromHsl(hue2, 165, 42)
+    return QColor.fromHsl(hue, 165, 168), QColor.fromHsl(hue2, 185, 105)
 
 
 def draw_cover(p: QPainter, rect: QRectF, title: str):

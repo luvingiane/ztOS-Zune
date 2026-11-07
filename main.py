@@ -14,6 +14,7 @@ import ztos
 import perf
 import hub
 import screens
+import player
 
 app = ztos.App()
 perf.install(app)
@@ -32,7 +33,11 @@ if _nav:
             elif step == "settings":
                 music.turn(4)
             elif step == "now":
-                app.push(screens.NowPlaying(app))
+                app.push(player.NowPlaying(app))
+            elif step == "options":
+                page = player.NowPlaying(app)
+                app.push(page)
+                QTimer.singleShot(800, page.view._open_options)
             elif step == "queue":
                 app.push(screens.QueuePage())
             elif step == "search":

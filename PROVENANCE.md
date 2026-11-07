@@ -66,3 +66,10 @@ il proprietario ha letto il rapporto di cancellazione.
   (GPL-3.0-or-later), riletto e citéato file:riga; il client Python lo
   reimplementa (newline-JSON sullo stesso socket), non copia sorgenti Rust.
 - Se in futuro si riusa codice vero da Slipmat, lo si annota qui.
+
+| Schermata "In reproducción" stile Zune HD (copertina piccola con ombra, testi a destra, parola gigante sullo sfondo, seek con -tempo, 5 controlli) | `docs/shots/40-ref-nowplaying.png` — **osservato da: screenshot del proprietario del 7/11** (preso dalla demo del Zune HD usata come riferimento visivo) | 2026-11-07 |
+| Menu contestuale Apple Music iOS (voci in italiano) | `docs/shots/41-ref-options-menu.png` — **osservato da: screenshot del proprietario del 7/11** | 2026-11-07 |
+
+Solo osservazione di screenshot: nessun codice della demo è stato letto o
+copiato (la licenza resta in attesa; se l'autore dice no, cancellazione totale
+come da regola §1).
