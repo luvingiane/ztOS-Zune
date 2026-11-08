@@ -73,3 +73,12 @@ il proprietario ha letto il rapporto di cancellazione.
 Solo osservazione di screenshot: nessun codice della demo è stato letto o
 copiato (la licenza resta in attesa; se l'autore dice no, cancellazione totale
 come da regola §1).
+
+## Icone interne (stage 8)
+- `assets/icons/*.svg`: icone **symbolic di GNOME Adwaita** (LGPL-3.0+ /
+  CC-BY-SA per parti del tema), copiate da `/usr/share/icons/Adwaita/symbolic/`
+  su PC e ricolorate `#ffffff` (unico cambiamento: il fill). Richiesto dal
+  proprietario ("prendile da GTK"). Usate via `ztos.RoundButton("assets/icons/…")`
+  che le renderizza a 22×22 nell'anello standard dell'SDK.
+- `icon.svg`: wrapper SVG che embedded `icon.png` (nostro logo Zune, data-URI)
+  per la shell ztOS (librsvg sul telefono non legge PNG come tile glyph).
