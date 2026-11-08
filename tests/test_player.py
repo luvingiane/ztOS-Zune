@@ -87,7 +87,8 @@ def main():
     centers = {k: y + h / 2 for k, (x, y, w, h) in boxes.items()}
     check("controls one row (centers aligned within 8px)",
           max(centers.values()) - min(centers.values()) <= 8, str(centers))
-    check("play is the biggest", boxes["play"][2] >= max(v[2] for k, v in boxes.items() if k != "play"))
+    check("controls are the SDK standard RoundButton size (68x52)",
+          all(w == 68 and h == 52 for x, y, w, h in boxes.values()), str(boxes))
     # no volume slider
     check("no volume slider", not any("volume" in (o.objectName() or "").lower()
                                       for o in page.findChildren(QWidget))

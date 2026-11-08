@@ -9,6 +9,7 @@ results as rows, 350 ms debounce. Settings (S): stage/mode, sign in/out,
 refresh, quit daemon, about.
 """
 import ztos
+import icons
 from PySide6.QtCore import Qt, QTimer
 
 from client import backend, rtitle
@@ -37,8 +38,7 @@ class QueuePage(ztos.Page):
     def __init__(self):
         super().__init__("queue")
         self.list.setContentsMargins(17, 0, 16, 24)
-        import player as _p
-        self.bar(_p.CtrlButton("delete", self._clear, 52, label="clear"))
+        self.bar(ztos.RoundButton(icons.path("clear"), "clear", self._clear))
         self._sig = None
         self._row_widgets = []
         self._drag_from = None
@@ -58,8 +58,10 @@ class QueuePage(ztos.Page):
             for idx, row in enumerate(self._row_widgets):
                 if row._accent != (idx == position):
                     row._accent = (idx == position)
+                    # redraw only: content_changed() would mark the page's GL
+                    # list picture dirty and re-render the whole body into a
+                    # big texture on every queue event (the squash/overlap on B)
                     row.redraw()
-                    row.content_changed()
             return
         self._fill((items, position))
 
@@ -107,8 +109,7 @@ class QueuePage(ztos.Page):
                         hl = (i == self._drag_over)
                         if r._accent != hl:
                             r._accent = hl
-                            r.redraw()
-                            r.content_changed()
+                            r.redraw()      # no content_changed(): see _on_queue_event
             elif event.type() == QEvent.MouseButtonRelease:
                 frm, to = self._drag_from, self._drag_over
                 self._drag_from = None
@@ -145,8 +146,8 @@ class SearchPage(ztos.Page):
         self._filter = st.get("search_filter", "all")
         if self._filter not in dict(FILTERS):
             self._filter = "all"
-        import player as _p2
-        self._filter_btn = _p2.CtrlButton("more", self._filter_menu, 52, label=f"filter: {self._filter}")
+        self._filter_btn = ztos.RoundButton(icons.path("more"), f"filter: {self._filter}",
+                                            self._filter_menu)
         self.bar(self._filter_btn)
 
     def shown(self):

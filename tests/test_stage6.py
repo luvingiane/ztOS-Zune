@@ -121,16 +121,22 @@ def main():
     b.queue = {"items": [{"id": "c.fix1", "title": "Fixture Song One", "artist": "A", "album": "Al", "duration_ms": 1},
                          {"id": "i.fix2", "title": "Fixture Song Two", "artist": "B", "album": "Bl", "duration_ms": 2}],
                "position": 1}
+    q._gl_dirty = False                # as after a GL list picture was made
     b.queue_changed.emit()
     pump(app, 0.3)
     check("position-only queue event: no rebuild (same row objects)",
           q._row_widgets == rows_before and len(q._row_widgets) == n_before)
     check("accent moved to new position", q._row_widgets[1]._accent and not q._row_widgets[0]._accent)
+    check("position-only queue event does NOT dirty the GL list picture",
+          not q._gl_dirty, f"_gl_dirty={q._gl_dirty}")
     # drag row 0 over row 1 -> moveInQueue(0, 1)
     q._start_drag(0)
     r1 = q._row_widgets[1]
+    q._gl_dirty = False
     q.eventFilter(r1, QMouseEvent(QEvent.MouseMove, QPointF(10, 10), Qt.LeftButton, Qt.LeftButton, Qt.NoModifier))
     pump(app, 0.2)
+    check("drag highlight does NOT dirty the GL list picture", not q._gl_dirty,
+          f"_gl_dirty={q._gl_dirty}")
     check("drag computes target index", q._drag_over == 1, f"drag_over={q._drag_over}")
     q.eventFilter(r1, QMouseEvent(QEvent.MouseButtonRelease, QPointF(10, 10), Qt.LeftButton, Qt.LeftButton, Qt.NoModifier))
     pump(app, 0.5)

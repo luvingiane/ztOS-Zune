@@ -37,49 +37,6 @@ SEEK_Y = 505
 CTRL_Y = 568
 
 
-class CtrlButton(ztos.RoundButton):
-    """A round transport control: white ring + vector glyph (queue/prev/play/
-    pause/next/more). `big` makes the play/pause one larger."""
-
-    def set_label(self, label: str):
-        # keep our size (RoundButton.set_label would resize to 68x74)
-        if getattr(self, "_label", "") != label:
-            self._label = label
-            self.redraw()
-            self.content_changed()
-
-    def __init__(self, kind: str, on_tap=None, size: int = 48, label: str = ""):
-        super().__init__("", on_tap=on_tap)
-        self._kind = kind
-        if label:
-            self.set_label(label)
-            size = max(size, 68)
-            self.setFixedSize(size, size + 18)
-        else:
-            self.setFixedSize(size, size)
-
-    def draw(self, p: QPainter):
-        p.setRenderHints(QPainter.Antialiasing | QPainter.TextAntialiasing)
-        cx, cy = self.width() / 2.0, self.height() / 2.0
-        r = min(self.width(), self.height()) / 2.0 - 3.0
-        if self._p_to > 0:
-            p.setPen(Qt.NoPen)
-            p.setBrush(QColor(0, 0, 0, 110))
-            p.drawEllipse(QPointF(cx, cy), r, r)
-        p.setPen(QPen(QColor("white"), 2.2, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
-        p.setBrush(Qt.NoBrush)
-        p.drawEllipse(QPointF(cx, cy), r - 1.1, r - 1.1)
-        p.save()
-        p.translate(cx, cy)
-        icons.draw_glyph(p, self._kind, r * 1.35)
-        p.restore()
-        if getattr(self, "_label", ""):
-            p.setPen(QColor("white"))
-            p.setFont(ztos._font(ztos.FONT_REGULAR, 11.5))
-            p.drawText(QRectF(0, self.height() - 2, self.width(), 16),
-                       Qt.AlignHCenter | Qt.AlignTop, self._label)
-
-
 class PlayerSeek(QWidget):
     """Thin seek bar: white dot on a 3px track, elapsed left, '-remaining' right."""
 
@@ -270,15 +227,16 @@ class PlayerView(ztos.Entry):
         self._track = {}
         self._track_key = ""
         self._bg_full = None           # blurred full-screen bg, computed once per track
-        # controls: coda, prev, play/pausa (grande), next, opzioni
+        # controls: coda, prev, play/pausa, next, opzioni — the SDK's own
+        # RoundButtons with bundled GTK svg glyphs (standard 68x52, the SDK
+        # renders the svg 22x22 in its 44px ring)
         self.ctrl = {}
-        sizes = {"queue": 46, "prev": 48, "play": 64, "next": 48, "more": 46}
         for kind, cb in (("queue", lambda: app.push(_queue_page())),
                          ("prev", lambda: backend.transport("previous")),
                          ("play", lambda: backend.transport("playPause")),
                          ("next", lambda: backend.transport("next")),
                          ("more", self._open_options)):
-            b = CtrlButton(kind, on_tap=cb, size=sizes[kind])
+            b = ztos.RoundButton(icons.path(kind), on_tap=cb)
             b.setParent(self)
             self.ctrl[kind] = b
         self._seek = PlayerSeek(on_seek=lambda s: backend.seek(s * 1000.0))
@@ -306,13 +264,14 @@ class PlayerView(ztos.Entry):
         self._cover.setFixedSize(cover, cover)
         self._cover.move(cx, cy)
         self._cover.show()
-        # controls row: bottom edge inside the usable area
+        # controls row: the five SDK RoundButtons (68x52 each) centered,
+        # bottom edge inside the usable area
         sizes = {k: b.width() for k, b in self.ctrl.items()}
         row_h = max(sizes.values())
         row_y = top + usable_h - 10 - row_h
         total = sum(sizes.values())
-        gap = max(8.0, (w - 32 - total) / 4.0)
-        x = 16.0
+        gap = max(0.0, (w - 20.0 - total) / 4.0)
+        x = (w - (total + 4.0 * gap)) / 2.0
         for kind in ("queue", "prev", "play", "next", "more"):
             b = self.ctrl[kind]
             b.move(int(round(x)), int(row_y + (row_h - sizes[kind]) / 2))
@@ -349,21 +308,16 @@ class PlayerView(ztos.Entry):
             if p and image_for(p) is not None:
                 self._cover._img = image_for(p)
             self._bg_full = None            # recompute the blurred background once per track
-            play = self.ctrl["play"]
-            play._kind = "pause" if t.get("playing") else "play"
-            play.redraw()
-            play.content_changed()
+            self.ctrl["play"].set_glyph(icons.path("pause" if t.get("playing") else "play"))
             self.redraw()
             self.content_changed()
         self._seek.anchor(t.get("position_ms", 0), t.get("duration_ms", 0),
                           t.get("playing", False), track_key=key)
         if not metadata_changed:
             play = self.ctrl["play"]
-            kind = "pause" if t.get("playing") else "play"
-            if play._kind != kind:
-                play._kind = kind
-                play.redraw()
-                play.content_changed()
+            glyph = icons.path("pause" if t.get("playing") else "play")
+            if play._glyph != glyph:
+                play.set_glyph(glyph)
 
     def _tick(self):
         # just repaint the seek bar; the position itself is the anchored,

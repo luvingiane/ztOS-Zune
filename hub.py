@@ -8,6 +8,7 @@ its own sort (SortBy::for_view, slipmat-core/src/sort.rs), chosen from the
 app bar's sort button, direction included, remembered between sessions.
 """
 import ztos
+import icons
 import screens
 import player
 from PySide6.QtCore import QPointF, QRectF, Qt, QTimer
@@ -351,12 +352,11 @@ class DetailPage(ztos.Page):
         lay.addWidget(texts, 1)
         self.add(row)
         # action row: play / shuffle / queue / more (detail_page.rs header buttons)
-        import player as _player
         actions = self.round_buttons(
-            _player.CtrlButton("play", self._play_all, 52),
-            _player.CtrlButton("shuffle", self._play_shuffled, 52),
-            _player.CtrlButton("queue", self._enqueue_all, 52),
-            _player.CtrlButton("more", self._more_menu, 52))
+            ztos.RoundButton(icons.path("play"), on_tap=self._play_all),
+            ztos.RoundButton(icons.path("shuffle"), on_tap=self._play_shuffled),
+            ztos.RoundButton(icons.path("queue"), on_tap=self._enqueue_all),
+            ztos.RoundButton(icons.path("more"), on_tap=self._more_menu))
         self.space(4)
 
     def _play_all(self):
@@ -395,12 +395,14 @@ class MusicHub(ztos.Pivot):
                        ArtistsPage(app), screens.SettingsPage()]
         super().__init__(self._pages)
         self.turned.connect(self._sort_label)
-        import icons as _icons  # noqa: F401  (glyphs live only in icons.py)
-        self._sort_btn = player.CtrlButton("sort", self._sort_menu, 52, label="sort")
+        self._sort_btn = ztos.RoundButton(icons.path("sort"), "sort", self._sort_menu)
         self.bar(self._sort_btn,
-                 player.CtrlButton("search", lambda: app.push(screens.SearchPage()), 52, label="search"),
-                 player.CtrlButton("queue", lambda: app.push(screens.QueuePage()), 52, label="queue"),
-                 player.CtrlButton("play", lambda: app.push(player.NowPlaying(app)), 52, label="now playing"))
+                 ztos.RoundButton(icons.path("search"), "search",
+                                  lambda: app.push(screens.SearchPage())),
+                 ztos.RoundButton(icons.path("queue"), "queue",
+                                  lambda: app.push(screens.QueuePage())),
+                 ztos.RoundButton(icons.path("play"), "now playing",
+                                  lambda: app.push(player.NowPlaying(app))))
         backend.changed.connect(self._refill)
         self._sort_label(0)
 
