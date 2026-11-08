@@ -37,7 +37,8 @@ class QueuePage(ztos.Page):
     def __init__(self):
         super().__init__("queue")
         self.list.setContentsMargins(17, 0, 16, 24)
-        self.bar(ztos.RoundButton("delete", "clear", self._clear))
+        import player as _p
+        self.bar(_p.CtrlButton("delete", self._clear, 52, label="clear"))
         self._sig = None
         self._row_widgets = []
         self._drag_from = None
@@ -144,7 +145,8 @@ class SearchPage(ztos.Page):
         self._filter = st.get("search_filter", "all")
         if self._filter not in dict(FILTERS):
             self._filter = "all"
-        self._filter_btn = ztos.RoundButton("more", f"filter: {self._filter}", self._filter_menu)
+        import player as _p2
+        self._filter_btn = _p2.CtrlButton("more", self._filter_menu, 52, label=f"filter: {self._filter}")
         self.bar(self._filter_btn)
 
     def shown(self):

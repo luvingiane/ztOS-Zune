@@ -14,6 +14,11 @@ il formato esatto.
 
 Obiettivo: ≥ 30 fps reali (d_swap avg ≤ 33 ms), 60 se possibile (≤ 16.7 ms).
 
+## 0) Voci di misura: ora disattivate (una sola app nel menu)
+Su B le voci perf/profile sono rinominate `.disabled-<data>` (DEPLOY-B.md §8).
+Per riattivarle: `mv dev.oneplus2.zunehd-perf.desktop.disabled-<data> dev.oneplus2.zunehd-perf.desktop`
+(come zerone) + `printf 'apps\n' > /run/user/1000/ztmetro.ctl`.
+
 ## 1) Copia i due binari su B (dal PC)
 
 ```sh

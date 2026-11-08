@@ -21,6 +21,7 @@ Layout (360x640 logici, misurati sul riferimento):
 import time
 
 import ztos
+import icons
 from PySide6.QtCore import QPointF, QRectF, Qt, QTimer
 from PySide6.QtGui import QColor, QFont, QFontMetricsF, QImage, QLinearGradient, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QWidget
@@ -40,10 +41,22 @@ class CtrlButton(ztos.RoundButton):
     """A round transport control: white ring + vector glyph (queue/prev/play/
     pause/next/more). `big` makes the play/pause one larger."""
 
-    def __init__(self, kind: str, on_tap=None, size: int = 48):
+    def set_label(self, label: str):
+        # keep our size (RoundButton.set_label would resize to 68x74)
+        if getattr(self, "_label", "") != label:
+            self._label = label
+            self.redraw()
+            self.content_changed()
+
+    def __init__(self, kind: str, on_tap=None, size: int = 48, label: str = ""):
         super().__init__("", on_tap=on_tap)
         self._kind = kind
-        self.setFixedSize(size, size)
+        if label:
+            self.set_label(label)
+            size = max(size, 68)
+            self.setFixedSize(size, size + 18)
+        else:
+            self.setFixedSize(size, size)
 
     def draw(self, p: QPainter):
         p.setRenderHints(QPainter.Antialiasing | QPainter.TextAntialiasing)
@@ -56,52 +69,15 @@ class CtrlButton(ztos.RoundButton):
         p.setPen(QPen(QColor("white"), 2.2, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
         p.setBrush(Qt.NoBrush)
         p.drawEllipse(QPointF(cx, cy), r - 1.1, r - 1.1)
-        p.setPen(QPen(QColor("white"), 2.2, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
-        p.setBrush(QColor("white"))
-        s = r * 0.52
-        k = self._kind
-        if k == "play":
-            p.drawPolygon([QPointF(cx - s * 0.45, cy - s), QPointF(cx - s * 0.45, cy + s),
-                           QPointF(cx + s * 0.9, cy)])
-        elif k == "pause":
-            p.setPen(Qt.NoPen)
-            p.drawRect(QRectF(cx - s * 0.8, cy - s, s * 0.62, 2 * s))
-            p.drawRect(QRectF(cx + s * 0.18, cy - s, s * 0.62, 2 * s))
-        elif k == "prev":
-            p.setPen(Qt.NoPen)
-            p.drawRect(QRectF(cx - s, cy - s, s * 0.22, 2 * s))
-            p.drawPolygon([QPointF(cx + s * 0.9, cy - s), QPointF(cx + s * 0.9, cy + s),
-                           QPointF(cx - s * 0.55, cy)])
-        elif k == "next":
-            p.setPen(Qt.NoPen)
-            p.drawRect(QRectF(cx + s * 0.78, cy - s, s * 0.22, 2 * s))
-            p.drawPolygon([QPointF(cx - s * 0.9, cy - s), QPointF(cx - s * 0.9, cy + s),
-                           QPointF(cx + s * 0.55, cy)])
-        elif k == "shuffle":
-            p.setPen(QPen(QColor("white"), 2.2, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
-            p.drawLine(QPointF(cx - s, cy - s * 0.45), QPointF(cx + s * 0.2, cy - s * 0.45))
-            p.drawLine(QPointF(cx - s, cy + s * 0.45), QPointF(cx + s * 0.2, cy + s * 0.45))
-            p.drawLine(QPointF(cx - s * 0.2, cy - s * 0.45), QPointF(cx + s, cy + s * 0.45))
-            p.drawLine(QPointF(cx - s * 0.2, cy + s * 0.45), QPointF(cx + s, cy - s * 0.45))
-            p.setBrush(QColor("white"))
-            p.setPen(Qt.NoPen)
-            p.drawPolygon([QPointF(cx + s - 2, cy + s * 0.45 - 4), QPointF(cx + s + 2, cy + s * 0.45),
-                           QPointF(cx + s - 2, cy + s * 0.45 + 4)])
-            p.drawPolygon([QPointF(cx + s - 2, cy - s * 0.45 + 4), QPointF(cx + s + 2, cy - s * 0.45),
-                           QPointF(cx + s - 2, cy - s * 0.45 - 4)])
-        elif k == "queue":            # coda: list glyph
-            p.setPen(QPen(QColor("white"), 2.0, Qt.SolidLine, Qt.RoundCap))
-            for i, yy in enumerate((-s * 0.55, 0.0, s * 0.55)):
-                p.drawLine(QPointF(cx - s, cy + yy), QPointF(cx + s, cy + yy))
-            p.setBrush(QColor("white"))
-            p.setPen(Qt.NoPen)
-            p.drawPolygon([QPointF(cx - s * 0.2, cy - s * 0.85), QPointF(cx + s * 0.55, cy - s * 0.45),
-                           QPointF(cx - s * 0.2, cy - s * 0.05)])
-        elif k == "more":             # opzioni: tre punti
-            p.setBrush(QColor("white"))
-            p.setPen(Qt.NoPen)
-            for xx in (-s * 0.6, 0.0, s * 0.6):
-                p.drawEllipse(QPointF(cx + xx, cy), 2.2, 2.2)
+        p.save()
+        p.translate(cx, cy)
+        icons.draw_glyph(p, self._kind, r * 1.35)
+        p.restore()
+        if getattr(self, "_label", ""):
+            p.setPen(QColor("white"))
+            p.setFont(ztos._font(ztos.FONT_REGULAR, 11.5))
+            p.drawText(QRectF(0, self.height() - 2, self.width(), 16),
+                       Qt.AlignHCenter | Qt.AlignTop, self._label)
 
 
 class PlayerSeek(QWidget):
@@ -496,7 +472,10 @@ class OptionsMenu(ztos.Entry):
         p.drawRect(r)
         y = 12.0
         for icon, label, sub, _cb in self._items:
-            _draw_menu_icon(p, icon, 26, y + self.ROW_H / 2.0)
+            p.save()
+            p.translate(26, y + self.ROW_H / 2.0)
+            icons.draw_glyph(p, icon, 22)
+            p.restore()
             p.setPen(QColor("white"))
             p.setFont(ztos._font(ztos.FONT_REGULAR, 16))
             p.drawText(QPointF(44, y + 22), label)
@@ -522,34 +501,6 @@ class OptionsMenu(ztos.Entry):
 def _next_repeat(cur):
     order = ["none", "one", "all"]
     return order[(order.index(cur) + 1) % len(order)] if cur in order else "all"
-
-
-def _draw_menu_icon(p: QPainter, name: str, size: float, cy: float):
-    p.save()
-    p.translate(12 + size / 2, cy)
-    p.setPen(QPen(QColor("white"), 1.8, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
-    s = size / 2
-    if name == "star":
-        path = QPainterPath()
-        import math
-        for i in range(10):
-            ang = -math.pi / 2 + i * math.pi / 5
-            r = s if i % 2 == 0 else s * 0.45
-            (path.lineTo if i else path.moveTo)(math.cos(ang) * r, math.sin(ang) * r)
-        path.closeSubpath()
-        p.drawPath(path)
-    elif name == "album":
-        p.drawRect(QRectF(-s * 0.8, -s * 0.8, s * 1.6, s * 1.6))
-        p.drawEllipse(QPointF(0, 0), s * 0.35, s * 0.35)
-    elif name == "artist":
-        p.drawEllipse(QPointF(0, -s * 0.45), s * 0.35, s * 0.35)
-        p.drawArc(QRectF(-s * 0.7, -s * 0.1, s * 1.4, s * 1.4), 0, 180 * 16)
-    elif name == "shuffle":
-        p.drawLine(QPointF(-s, -s * 0.4), QPointF(s, -s * 0.4))
-        p.drawLine(QPointF(-s, s * 0.4), QPointF(s, s * 0.4))
-    elif name == "repeat":
-        p.drawArc(QRectF(-s * 0.8, -s * 0.8, s * 1.6, s * 1.6), 30 * 16, 300 * 16)
-    p.restore()
 
 
 class NowPlaying(ztos.Page):

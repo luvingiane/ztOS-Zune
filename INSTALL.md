@@ -33,21 +33,14 @@ DESKTOP
 # fa rileggere la lista app alla shell:
 printf 'apps\n' > "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/ztmetro.ctl"   # su B dentro ztOS
 
-# voce extra "Zune HD (profile)" per la profilazione CPU su B (ZUNE_PROFILE=1 ZUNE_PERF=1, vedi PROFILE-ON-B.md):
-ssh <user>@<phone-ip> 'cat > ~/.local/share/applications/dev.oneplus2.zunehd-profile.desktop' <<'DESKTOP'
-[Desktop Entry]
-Type=Application
-Name=Zune HD (profile)
-Comment=Zune HD con profiler CPU attivo (ZUNE_PROFILE=1 ZUNE_PERF=1)
-Exec=env ZUNE_PROFILE=1 ZUNE_PERF=1 /home/zerone/.local/share/ztos/apps/dev.oneplus2.zunehd
-Icon=dev.oneplus2.zunehd
-Terminal=false
-StartupWMClass=ztos.dev.oneplus2.zunehd
-Categories=Audio;Music;
-X-ZtOS-Id=dev.oneplus2.zunehd
-X-ZtOS-Version=0.1.0
-DESKTOP
-# (stesso id: la voce di menu si aggiunge a quella normale)
+# NOTA: nel menu resta UNA sola voce ("Zune HD"). Le voci di misura
+# (perf/profile) si creano SOLO quando servono, con lo script standard:
+#   ~/oneplus2/scripts/deploy-app-b.sh --perf dist/dev.oneplus2.zunehd dev.oneplus2.zunehd "Zune HD" icon.png
+# e si disattivano rinominando il .desktop in .disabled-<data> (DEPLOY-B.md §8).
+# Su B ora sono disattivate: dev.oneplus2.zunehd-perf.desktop.disabled-*,
+# dev.oneplus2.zunehd-profile.desktop.disabled-*, zune-perf-ref…disabled-*.
+# Icona: png 256x256 in ~/.local/share/icons/hicolor/256x256/apps/<id>.png
+# (l'icona è icon.png nel repo, ztos.toml icon = "icon.png").
 
 # .desktop + icona dell'app di riferimento (zuneref):
 ssh <user>@<phone-ip> 'cat > ~/.local/share/icons/hicolor/scalable/apps/dev.oneplus2.zuneref.svg' < ref/icon.svg

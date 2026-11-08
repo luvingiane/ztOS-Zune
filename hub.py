@@ -395,11 +395,12 @@ class MusicHub(ztos.Pivot):
                        ArtistsPage(app), screens.SettingsPage()]
         super().__init__(self._pages)
         self.turned.connect(self._sort_label)
-        self._sort_btn = ztos.RoundButton("more", "sort", self._sort_menu)
+        import icons as _icons  # noqa: F401  (glyphs live only in icons.py)
+        self._sort_btn = player.CtrlButton("sort", self._sort_menu, 52, label="sort")
         self.bar(self._sort_btn,
-                 ztos.RoundButton("search", "search", lambda: app.push(screens.SearchPage())),
-                 ztos.RoundButton("more", "queue", lambda: app.push(screens.QueuePage())),
-                 ztos.RoundButton("play", "now playing", lambda: app.push(player.NowPlaying(app))))
+                 player.CtrlButton("search", lambda: app.push(screens.SearchPage()), 52, label="search"),
+                 player.CtrlButton("queue", lambda: app.push(screens.QueuePage()), 52, label="queue"),
+                 player.CtrlButton("play", lambda: app.push(player.NowPlaying(app)), 52, label="now playing"))
         backend.changed.connect(self._refill)
         self._sort_label(0)
 

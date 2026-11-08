@@ -5,7 +5,7 @@ name = "Zune HD"        # in the app list and on tiles
 caps = "ZUNE HD"        # the small line over every page's title
 version = "0.1.0"
 entry = "main.py"
-icon = "icon.svg"      # white on transparent, like the phone's own; svg or png
+icon = "icon.png"      # app icon (png, 256x256; svg or png both work)
 description = "Zune HD style music player, a Slipmat (slipmatd) client"
 # system packages it needs on the phone besides Python and Qt (pacman names);
 # install and deploy check them and install what is missing
