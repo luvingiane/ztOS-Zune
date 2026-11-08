@@ -292,6 +292,7 @@ class PlayerView(ztos.Entry):
         super().__init__("", "")
         self._app = app
         self._track = {}
+        self._track_key = ""
         self._bg_full = None           # blurred full-screen bg, computed once per track
         # controls: coda, prev, play/pausa (grande), next, opzioni
         self.ctrl = {}
@@ -354,23 +355,39 @@ class PlayerView(ztos.Entry):
 
     # ---- content -------------------------------------------------------------
     def set_track(self, t: dict):
+        # slipmatd publishes a snapshot every 500 ms while playing
+        # (serve.rs:39 TICK_MS=500): a position-only snapshot must NOT
+        # invalidate the page cache (that saturated the GUI thread on B and
+        # made the seek bar jump every ~2 s). Only a real track change
+        # redraws the page; position/playing only touch the seek bar and the
+        # play glyph.
+        key = f"{t.get('title', '')}|{t.get('artist', '')}|{t.get('track_id', '')}|{t.get('art_path', '')}"
+        metadata_changed = key != self._track_key
         self._track = t
-        title = t.get("title", "")
-        self._cover.set_template(t.get("artwork_template", ""), t.get("album") or title)
-        art = t.get("art_path", "")
-        p = local_art(art, 512) if art else None
-        if p and image_for(p) is not None:
-            self._cover._img = image_for(p)
-        self._bg_full = None                # recompute the blurred background
+        self._track_key = key
+        if metadata_changed:
+            title = t.get("title", "")
+            self._cover.set_template(t.get("artwork_template", ""), t.get("album") or title)
+            art = t.get("art_path", "")
+            p = local_art(art, 512) if art else None
+            if p and image_for(p) is not None:
+                self._cover._img = image_for(p)
+            self._bg_full = None            # recompute the blurred background once per track
+            play = self.ctrl["play"]
+            play._kind = "pause" if t.get("playing") else "play"
+            play.redraw()
+            play.content_changed()
+            self.redraw()
+            self.content_changed()
         self._seek.anchor(t.get("position_ms", 0), t.get("duration_ms", 0),
-                          t.get("playing", False),
-                          track_key=f"{t.get('title', '')}|{t.get('artist', '')}|{t.get('track_id', '')}")
-        play = self.ctrl["play"]
-        play._kind = "pause" if t.get("playing") else "play"
-        play.redraw()
-        play.content_changed()
-        self.redraw()
-        self.content_changed()
+                          t.get("playing", False), track_key=key)
+        if not metadata_changed:
+            play = self.ctrl["play"]
+            kind = "pause" if t.get("playing") else "play"
+            if play._kind != kind:
+                play._kind = kind
+                play.redraw()
+                play.content_changed()
 
     def _tick(self):
         # just repaint the seek bar; the position itself is the anchored,

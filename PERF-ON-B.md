@@ -93,7 +93,8 @@ a occhio (1 = a scatti, 5 = fluido).
 | zunehd | pivot music ferma | | | | | | | | | | | | |
 | zunehd | scroll lista (songs) | | | | | | | | | | | | |
 | zunehd | turnstile entra/esci | | | | | | | | | | | | |
-| zunehd | now playing | | | | | | | | | | | | |
+| zunehd | now playing (con player in riproduzione) | | | | | | | | | | | | |
+| zunehd | barra di avanzamento ogni 500 ms (snapshot) | | | | | | | | | | | | |
 
 Lettura: se `zuneref` è a 60 fps e `zunehd` no → il costo è nel contenuto
 dell'app (raster ms/s e uploads lo dicono); se anche `zuneref` lagga →
@@ -101,3 +102,12 @@ pipeline SDK/telefono (d_swap alto con draw ms basso = pacing/attesa frame
 Wayland; upload ms alti = costo memcpy in `sysmem`; identical alto =
  ridisegna senza cambiado). Incolla anche 3-5 righe `zune-perf` raw per
 ciascuna app.
+
+## 5) Scenario "barra che avanza a scatti" (fix stage 6b, 8/11)
+Apri **"Zune HD (perf)"** dal menu (ZUNE_PERF=1), metti in play un brano e resta
+sul player 15 s senza toccare nulla. Nel log `zune-perf` durante la
+riproduzione ci si aspetta ora: `paints` ~2/s (solo la seek bar), `raster`
+~0 ms, nessun salto di `changes`. Prima del fix ogni snapshot (ogni 500 ms,
+`serve.rs:39`) invalidava tutta la pagina → repaint full-page a DPR 3 →
+barra visibile ogni ~2 s. Riporta: `paints/s` e `raster ms/s` sul player in
+play + `top -b -H -d 2 -n 5` sul thread python3.
