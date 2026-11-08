@@ -72,13 +72,15 @@ def main():
 
     view = page.view
     ctrl = view.ctrl
-    # --- five controls in one row -------------------------------------------
+    # usable area = window minus shell chrome (ztmetro.c:128-131: status 28, nav 40)
+    UX0, UY0, UW, UH = 0, player.TOP_INSET, 360, 640 - player.TOP_INSET - player.BOTTOM_INSET
+    # --- five controls in one row, inside the USABLE area --------------------
     check("five controls", sorted(ctrl) == ["more", "next", "play", "prev", "queue"],
           str(sorted(ctrl)))
     boxes = {k: (b.x(), b.y(), b.width(), b.height()) for k, b in ctrl.items()}
     for k, (x, y, w, h) in boxes.items():
-        check(f"ctrl {k} >= 44px and inside", w >= 44 and h >= 44 and 0 <= x and x + w <= 360
-              and 0 <= y and y + h <= 640, str((x, y, w, h)))
+        inside = w >= 44 and h >= 44 and x >= UX0 and x + w <= UX0 + UW and y >= UY0 and y + h <= UY0 + UH
+        check(f"ctrl {k} >= 44px and inside usable area", inside, str((x, y, w, h)))
     xs = sorted((x, x + w) for x, y, w, h in boxes.values())
     overlap = any(xs[i][1] > xs[i + 1][0] for i in range(len(xs) - 1))
     check("controls do not overlap", not overlap, str(xs))
@@ -90,12 +92,16 @@ def main():
     check("no volume slider", not any("volume" in (o.objectName() or "").lower()
                                       for o in page.findChildren(QWidget))
           and not hasattr(page, "_vol"))
-    # seek + cover inside
+    # seek + big centered cover inside the usable area
     s = view._seek
-    check("seek inside window", 0 <= s.x() and s.x() + s.width() <= 360 and 0 <= s.y() and s.y() + s.height() <= 640,
+    check("seek inside usable area", s.x() >= UX0 and s.x() + s.width() <= UX0 + UW
+          and s.y() >= UY0 and s.y() + s.height() <= UY0 + UH,
           str((s.x(), s.y(), s.width(), s.height())))
     c = view._cover
-    check("cover inside window", 0 <= c.x() and c.x() + c.width() <= 360 and 0 <= c.y() and c.y() + c.height() <= 640)
+    check("cover big+centered, inside usable area",
+          c.width() >= 280 and abs((c.x() + c.width() / 2) - UW / 2) <= 2
+          and c.x() >= UX0 and c.y() >= UY0 and c.y() + c.height() <= UY0 + UH,
+          str((c.x(), c.y(), c.width(), c.height())))
 
     # --- options menu ---------------------------------------------------------
     track = b.now_playing()

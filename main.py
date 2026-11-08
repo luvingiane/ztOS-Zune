@@ -38,6 +38,8 @@ if _nav:
                 page = player.NowPlaying(app)
                 app.push(page)
                 QTimer.singleShot(800, page.view._open_options)
+            elif step == "album":
+                app.push(hub.DetailPage("album", "album-Lowlight Radio"))
             elif step == "queue":
                 app.push(screens.QueuePage())
             elif step == "search":

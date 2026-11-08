@@ -69,6 +69,7 @@ if _ENABLED:
 
     _win = _Win()
     _prev_sig = None
+    _live_tex = {}      # (id(layer), key) -> bytes, for the "texture vive/byte" report
 
     def _stats(v):
         if not v:
@@ -82,12 +83,15 @@ if _ENABLED:
         _prev_sig = None
         raster = " ".join(f"{k}={v[0]}x{v[1]:.0f}ms(max{v[2]:.0f})"
                           for k, v in sorted(w.raster.items()))
+        tex_n = len(_live_tex)
+        tex_b = sum(_live_tex.values())
         line = (f"zune-perf t={_now() - _t0:7.1f}s frames={w.frames} swaps={w.swaps} "
                 f"refreshes={w.refreshes} "
                 f"d_paint(avg/min/max)={_stats(w.d_paint)} d_swap={_stats(w.d_swap)} "
                 f"draw_ms(avg/max)={w.draw_ms / max(1, w.frames):.2f}/{w.draw_max:.2f} "
                 f"quads(avg/max)={w.quads / max(1, w.frames):.1f}/{w.quads_max} identical={w.identical} "
                 f"uploads={w.uploads} bytes={w.upload_bytes} maxpx={w.upload_max} "
+                f"tex_live={tex_n} tex_live_bytes={tex_b} "
                 f"raster[{raster}] paints={w.paints} changes={w.changes}")
         print(line, file=__import__("sys").stderr, flush=True)
 
@@ -175,6 +179,21 @@ if _ENABLED:
             _win.refreshes += 1
             return original(self)
         _wrap(glmod.Layer, "refresh", refresh)
+
+        # live textures on the GPU layer: uploads minus drops, with bytes
+        def layer_upload(original, self, key, image):
+            try:
+                return original(self, key, image)
+            finally:
+                _live_tex[(id(self), key)] = image.width() * image.height() * 4
+        _wrap(glmod.Layer, "upload", layer_upload)
+
+        def layer_drop(original, self, key):
+            try:
+                return original(self, key)
+            finally:
+                _live_tex.pop((id(self), key), None)
+        _wrap(glmod.Layer, "drop", layer_drop)
 
         # --- Qt's raster passes (CPU): snapshots, list prints, row paints ---
         plain_snapshot = ztos._snapshot

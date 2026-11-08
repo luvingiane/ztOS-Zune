@@ -105,19 +105,23 @@ class SongsPage(ListPage):
     def __init__(self, app):
         super().__init__("songs")
         self._app = app
+        self._rows = []
 
     def build(self, rows):
-        import player
-        for s in rows:
+        self._rows = rows
+        for i, s in enumerate(rows):
             self.add(Row(rtitle(s), s.get("subtitle", ""), s.get("durationMs", 0),
-                         on_tap=lambda s=s: self._play(s),
+                         art=s.get("artworkTemplate", ""),
+                         on_tap=lambda i=i: self._play(i),
                          on_hold=lambda s=s: self._menu(s)))
 
-    def _play(self, s):
+    def _play(self, i):
         import player
         ztos.haptic("tap")
-        ids = [s.get("catalogId") or s.get("id", "")]
-        backend.play_ids(ids, 0)
+        sent, reason = backend.play_list(self._rows, i)
+        if not sent:
+            ztos.notify("cannot play", reason or "slipmatd not ready")
+            return
         self._app.push(player.NowPlaying(self._app))
 
     def _menu(self, s):
@@ -203,11 +207,16 @@ class AlbumsPage(ListPage):
 
 
 class DetailPage(ztos.Page):
-    """An album / artist / playlist page: header cover + rows (`open` req)."""
+    """Album / artist / playlist page, metro style: compact header (real cover
+    140px left, name in light type, artist/curator, track count + total time)
+    + one action row (play / shuffle / queue / more) like the original's
+    detail_page.rs header buttons, then the track rows with thumbs."""
 
     def __init__(self, kind: str, id_: str):
         super().__init__("…")
         self._kind, self._id = kind, id_
+        self._entries = []
+        self._header = {}
 
     def shown(self):
         self.clear()
@@ -218,22 +227,74 @@ class DetailPage(ztos.Page):
         self.title = rtitle(header)
         if not backend.live and not entries:
             self.add(Notice(backend.demo_notice or "demo data"))
-        tpl = header.get("artworkTemplate", "")
-        if tpl or header.get("artPath"):
-            cover = Artwork(120, rtitle(header), tpl, 300)
-            if header.get("artPath"):
-                from art import local_art, image_for
-                p = local_art(header["artPath"], 512)
-                if p:
-                    cover._img = image_for(p)
-            self.space(8)
-            self.add(cover)
-        sub = header.get("subtitle", "")
-        if sub:
-            self.add(Notice(sub))
+        self._entries = entries
+        self._header = header
+        self._header_block(header)
         for e in entries:
-            self.add(Row(rtitle(e), e.get("subtitle", ""), e.get("durationMs", 0)))
-        prewarm(entries, GRID_ART)
+            self.add(Row(rtitle(e), e.get("subtitle", ""), e.get("durationMs", 0),
+                         art=e.get("artworkTemplate", "")))
+        prewarm([header] + entries, GRID_ART)
+
+    def _header_block(self, header):
+        from PySide6.QtWidgets import QWidget, QHBoxLayout
+        row = QWidget()
+        lay = QHBoxLayout(row)
+        lay.setContentsMargins(0, 10, 0, 10)
+        lay.setSpacing(14)
+        cover = Artwork(140, rtitle(header), header.get("artworkTemplate", ""), 300)
+        lay.addWidget(cover)
+        texts = QWidget()
+        from PySide6.QtWidgets import QVBoxLayout, QLabel
+        tv = QVBoxLayout(texts)
+        tv.setContentsMargins(0, 0, 0, 0)
+        name = QLabel(rtitle(header))
+        name.setFont(ztos._font(ztos.FONT_LIGHT, 30))
+        name.setStyleSheet("color: white;")
+        sub = QLabel(header.get("subtitle", ""))
+        sub.setFont(ztos._font(ztos.FONT_REGULAR, 15))
+        sub.setStyleSheet("color: rgba(255,255,255,0.6);")
+        n = len(self._entries)
+        total = sum(e.get("durationMs", 0) for e in self._entries)
+        meta = QLabel(f"{n} tracks · {fmt_ms(total)}" if n else "")
+        meta.setFont(ztos._font(ztos.FONT_REGULAR, 13))
+        meta.setStyleSheet("color: rgba(255,255,255,0.45);")
+        tv.addWidget(name)
+        tv.addWidget(sub)
+        tv.addWidget(meta)
+        tv.addStretch(1)
+        lay.addWidget(texts, 1)
+        self.add(row)
+        # action row: play / shuffle / queue / more (detail_page.rs header buttons)
+        actions = self.round_buttons(
+            ztos.RoundButton("play", "play", self._play_all),
+            ztos.RoundButton("shuffle", "shuffle", self._play_shuffled),
+            ztos.RoundButton("more", "queue", self._enqueue_all),
+            ztos.RoundButton("more", "more", self._more_menu))
+        self.space(4)
+
+    def _play_all(self):
+        sent, reason = backend.play_list(self._entries, 0)
+        if not sent:
+            ztos.notify("cannot play", reason or "slipmatd not ready")
+
+    def _play_shuffled(self):
+        ids = [e.get("catalogId") for e in self._entries if e.get("catalogId")]
+        if ids and backend.live:
+            backend._send(backend._client.play, ids, 0, "shuffled")
+
+    def _enqueue_all(self):
+        ids = [e.get("catalogId") for e in self._entries if e.get("catalogId")]
+        if ids:
+            backend.enqueue(ids)
+
+    def _more_menu(self):
+        in_lib = bool(self._header.get("library"))
+        hid = self._header.get("id", "")
+        ztos.menu(self, [
+            ("add to queue", self._enqueue_all),
+            ("remove from library" if in_lib else "add to library",
+             lambda: backend.write("removeFromLibrary" if in_lib else "addToLibrary", hid)),
+        ])
 
 
 class MusicHub(ztos.Pivot):

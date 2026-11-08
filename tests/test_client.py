@@ -103,6 +103,26 @@ def main():
     items, pos = b.queue_items()
     check("queue event -> items/position", len(items) == 2 and pos == 0 and items[0]["title"] == "Fixture Song One")
 
+    # play like the original client: ids = catalog ids of the whole list,
+    # index = position among sendable rows, start = "clicked"
+    songs_rows = b.browse("songs", "title")
+    sent, reason = b.play_list(songs_rows, 0)
+    pump(app, 0.5)
+    reqs = [json.loads(l) for l in open(log)] if os.path.exists(log) else []
+    play_reqs = [r for r in reqs if r.get("req") == "play"]
+    check("play sends catalog ids of the list + index + start=clicked",
+          sent and play_reqs and play_reqs[-1].get("ids") == ["c.fix1", "c.fix3"]
+          and play_reqs[-1].get("index") == 0 and play_reqs[-1].get("start") == "clicked",
+          str(play_reqs[-1] if play_reqs else None))
+    # tapped row without catalog_id (library-only, not streamable) -> reason, no play of library id
+    unplay_idx = next(i for i, r in enumerate(songs_rows) if not r.get("catalogId"))
+    sent2, reason2 = b.play_list(songs_rows, unplay_idx)   # Fixture Song Two has catalog_id null
+    check("unplayable row -> refused with reason, library id NOT sent",
+          not sent2 and reason2 and "cannot be streamed" in reason2, f"idx={unplay_idx} {reason2}")
+    reqs = [json.loads(l) for l in open(log)]
+    check("no play req with library id i.fix2",
+          all("i.fix2" not in (r.get("ids") or []) for r in reqs if r.get("req") == "play"))
+
     # writes go out on the wire (no response -> give the server thread a beat)
     b.write("favorite", "c.fix1")
     b.transport("setVolume", volume=0.5)

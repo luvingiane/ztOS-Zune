@@ -47,36 +47,57 @@ def local_art(path_or_template, size: int = 512):
     return None
 
 
-class _Fetcher(QObject):
-    """Downloads queued (template, size) pairs on a worker thread."""
+CACHE_MAX_BYTES = 24 * 1024 * 1024     # 24 MB cap for the on-disk art cache
+
+
+def _evict_cache():
+    """Keep the disk cache under CACHE_MAX_BYTES: evict oldest files first."""
+    try:
+        files = [(os.path.getmtime(os.path.join(CACHE_DIR, f)), os.path.join(CACHE_DIR, f))
+                 for f in os.listdir(CACHE_DIR) if f.endswith(".jpg")]
+    except OSError:
+        return
+    total = sum(os.path.getsize(p) for _, p in files)
+    for _, p in sorted(files):
+        if total <= CACHE_MAX_BYTES:
+            return
+        try:
+            total -= os.path.getsize(p)
+            os.unlink(p)
+        except OSError:
+            pass
+
+
+class _FetchThread(QThread):
+    """One worker thread; `done` is emitted from run() and delivered to the
+    GUI thread as a queued signal (Qt signals only, never touch widgets from
+    here). QThread.create() does NOT exist in PySide6 — that was the crash on
+    the phone (art.py:73 AttributeError), this replaces it."""
     done = Signal(str, str, bool)      # template, local path, ok
 
     def __init__(self):
         super().__init__()
         self._queue = []
         self._lock = threading.Lock()
-        self._busy = False
 
     def add(self, template, size):
-        if not template or "{w}" not in str(template):
+        template = str(template)
+        if not template or "{w}" not in template:
             return
-        p = cache_path(str(template), size)
+        p = cache_path(template, size)
         if os.path.exists(p):
-            self.done.emit(str(template), p, True)
+            self.done.emit(template, p, True)
             return
         with self._lock:
             if (template, size) not in self._queue:
                 self._queue.append((template, size))
-            start = not self._busy
-            self._busy = True
-        if start:
-            QThread.create(self._run)
+        if not self.isRunning():
+            self.start()
 
-    def _run(self):
+    def run(self):
         while True:
             with self._lock:
                 if not self._queue:
-                    self._busy = False
                     return
                 template, size = self._queue.pop(0)
             url = art_url(template, size)
@@ -88,8 +109,10 @@ class _Fetcher(QObject):
                 with urllib.request.urlopen(url, timeout=10) as r, open(tmp, "wb") as f:
                     f.write(r.read())
                 os.replace(tmp, path)
+                _evict_cache()
                 ok = True
-            except Exception:
+            except Exception as exc:
+                print(f"zunehd art: fetch failed for {url}: {exc}", flush=True)
                 try:
                     os.unlink(tmp)
                 except OSError:
@@ -97,18 +120,38 @@ class _Fetcher(QObject):
             self.done.emit(template, path if ok else "", ok)
 
 
+class _Fetcher(QObject):
+    """Facade: queues downloads on the single _FetchThread and re-emits."""
+    done = Signal(str, str, bool)
+
+    def __init__(self):
+        super().__init__()
+        self._thread = _FetchThread()
+        self._thread.done.connect(self.done)         # started lazily on first add
+
+    def add(self, template, size):
+        self._thread.add(template, size)
+
+
 _fetcher = _Fetcher()
 _images = {}          # local path -> QImage (decoded once, shared, small cap)
+_IMAGES_MAX_BYTES = 24 * 1024 * 1024
+_images_bytes = 0
 
 
 def image_for(path: str):
+    global _images_bytes
     img = _images.get(path)
     if img is None and path and os.path.exists(path):
         img = QImage(path)
         if not img.isNull():
-            if len(_images) > 64:
-                _images.pop(next(iter(_images)))
+            size = img.width() * img.height() * 4
+            while _images_bytes > _IMAGES_MAX_BYTES and _images:
+                k = next(iter(_images))
+                _images_bytes -= _images[k].width() * _images[k].height() * 4
+                _images.pop(k)
             _images[path] = img
+            _images_bytes += size
     return img
 
 

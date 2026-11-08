@@ -14,10 +14,12 @@ no dateAdded for library songs — measured 0/541 in music/types.rs:366-373),
 so for songs+"added" we join the albums' date_added client-side and sort by
 (album added, track number) — the closest Apple's data allows.
 """
+import os
+import subprocess
 import threading
 import time
 
-from PySide6.QtCore import QCoreApplication, QObject, Signal
+from PySide6.QtCore import QCoreApplication, QObject, QTimer, Signal
 
 import library
 
@@ -44,9 +46,11 @@ def rtitle(r) -> str:
 
 VIEWS = ("artists", "albums", "songs", "playlists")
 
-# SortBy::for_view (slipmat-core/src/sort.rs:53-60): what each list can sort by
+# SortBy::for_view (slipmat-core/src/sort.rs:53-60): what each list can sort by.
+# songs also offers "added" (owner requirement): Apple sends no dateAdded for
+# library songs, so client.browse joins the albums' date_added (see there).
 SORTS = {
-    "songs": ["title", "artist", "album", "year"],
+    "songs": ["title", "artist", "album", "year", "added"],
     "albums": ["title", "artist", "year", "added"],
     "playlists": ["title", "added", "updated"],
     "artists": ["title"],
@@ -76,6 +80,9 @@ class Backend(QObject):
         self.queue = None
         self.stage = None
         self.last_error = ""
+        self._starting = False    # one daemon-start attempt at a time
+        self._reconnect_pending = False
+        self._backoff = 2.0
 
     # ---- connection / mode ---------------------------------------------------
     @property
@@ -91,18 +98,87 @@ class Backend(QObject):
             return f"demo data — slipmatd stage: {self.stage}"
         return ""
 
-    def connect(self, ready_timeout=8.0) -> bool:
-        """Connect once, subscribe, and wait for the stage event (ready or not)."""
+    # ---- daemon lifecycle: socket -> systemctl --user -> /usr/bin/slipmatd --
+    def _socket_path(self):
+        from slipmat.ipc import socket_path
+        return socket_path()
+
+    def _wait_socket(self, path, timeout):
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if path and os.path.exists(path):
+                return True
+            _pump_wait(threading.Event(), 0.1)
+        return bool(path and os.path.exists(path))
+
+    def _ensure_daemon(self) -> bool:
+        """Make sure slipmatd is listening, without blocking the GUI (events
+        keep being pumped while waiting) and with one start attempt at a time.
+        Order: existing socket, `systemctl --user start slipmatd`, then
+        `/usr/bin/slipmatd` by absolute path (never trust PATH)."""
+        path = self._socket_path()
+        if path and os.path.exists(path):
+            return True
+        if not path:
+            return False
+        if self._starting:
+            return False
+        self._starting = True
+        try:
+            try:
+                subprocess.Popen(["systemctl", "--user", "start", "slipmatd"],
+                                 stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                 stderr=subprocess.DEVNULL, start_new_session=True)
+                if self._wait_socket(path, 5.0):
+                    return True
+            except OSError:
+                pass
+            if os.path.exists("/usr/bin/slipmatd"):
+                subprocess.Popen(["/usr/bin/slipmatd"],
+                                 stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                 stderr=subprocess.DEVNULL, start_new_session=True)
+                return self._wait_socket(path, 8.0)
+            self.last_error = "slipmatd not found (no socket, no systemctl unit, no /usr/bin/slipmatd)"
+            return False
+        finally:
+            self._starting = False
+
+    def _schedule_reconnect(self):
+        """Auto-reconnect with backoff (2s, 4s, ... max 30s), one pending."""
+        if self._reconnect_pending:
+            return
+        self._reconnect_pending = True
+        QTimer.singleShot(int(self._backoff * 1000), self._reconnect)
+
+    def _reconnect(self):
+        self._reconnect_pending = False
+        self._backoff = min(30.0, self._backoff * 2)
+        if self._client is None:
+            self.stage = None
+            self.stage_changed.emit("reconnecting…")
+            self.connect()
+
+    def connect(self, ready_timeout=3.0) -> bool:
+        """Connect once, subscribe, and wait briefly for the stage event.
+        The stage also arrives later as an event and updates the UI itself."""
         if self._client is not None:
             return self.live
-        if not library.slipmat_available():
+        if not self._ensure_daemon():
             return False
         try:
             from slipmat.ipc import SlipmatClient
-            client = SlipmatClient()
+            client = SlipmatClient()          # socket exists: no spawn, no 10s block
             client.eventReceived.connect(self._on_event)
-            client.lost.connect(lambda why: self.error.emit(f"slipmatd connection lost: {why}"))
+            def _lost(why):
+                self.error.emit(f"slipmatd connection lost: {why}")
+                self._client = None
+                self.stage = None
+                self._backoff = 2.0
+                self.stage_changed.emit("reconnecting…")
+                self._schedule_reconnect()
+            client.lost.connect(_lost)
             self._client = client
+            self._backoff = 2.0
             client.subscribe()
             client.stage()
             client.snapshot()
@@ -114,6 +190,7 @@ class Backend(QObject):
         except Exception as exc:
             self.last_error = str(exc)
             self._client = None
+            self._schedule_reconnect()
             return False
 
     def _wait_for(self, key, timeout):
@@ -268,6 +345,21 @@ class Backend(QObject):
 
     def play_ids(self, ids, index=0):
         return self._send(self._client.play, ids, index) if self.live else False
+
+    def play_list(self, rows, index):
+        """Play a list from a tapped row, exactly like the original client
+        (slipmat/src/app/queue.rs play_entries + climat main.rs row click):
+        ids = the CATALOG ids of all rows (library ids are dropped — a library
+        id is not streamable), index = position among the sendable rows,
+        start = "clicked". Returns (sent, reason-if-not)."""
+        ids = [r.get("catalogId") for r in rows if r.get("catalogId")]
+        if not ids:
+            return False, "nothing here can be streamed (no catalog id)"
+        if not (rows[index].get("catalogId")):
+            return False, "this track cannot be streamed (catalog_id is null)"
+        idx = sum(1 for r in rows[:index] if r.get("catalogId"))
+        sent = self._send(self._client.play, ids, idx, "clicked") if self.live else False
+        return sent, None if sent else "not live"
 
     def enqueue(self, ids, next_=False):
         return self._send(self._client.enqueue, ids, next_) if self.live else False

@@ -3,12 +3,14 @@
 Scopo: con `ZUNE_PERF=1` sia **Zune HD** (`dev.oneplus2.zunehd`) sia l'app
 minima di riferimento (**Zune Ref**, `dev.oneplus2.zuneref`) scrivono nel loro
 log (`~/.local/state/ztos/<id>.log`) una riga `zune-perf` al secondo con:
-frame/s (paintGL), swap/s (frameSwapped = frame presentados), intervallo
+frame/s (paintGL), swap/s (frameSwapped = frame presentati), intervallo
 frame-to-frame avg/min/max (d_paint e d_swap), ms CPU dentro `zsdk_draw` e
 numero di quad, frame con quad identici al precedente (`identical` =
 aggiornamenti senza cambio di contenuto), texture caricate (numero/byte/dim),
-ms delle passate raster Qt, refresh del layer, paint dei widget, cambi di
-contenuto (`changes`). Vedi `perf.py` per il formato esatto.
+**texture vive sulla GPU (`tex_live`, `tex_live_bytes` — per il budget GPU:
+mai errori `MESA: error` nel log)**, ms delle passate raster Qt, refresh del
+layer, paint dei widget, cambi di contenuto (`changes`). Vedi `perf.py` per
+il formato esatto.
 
 Obiettivo: ≥ 30 fps reali (d_swap avg ≤ 33 ms), 60 se possibile (≤ 16.7 ms).
 

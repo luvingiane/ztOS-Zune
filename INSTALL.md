@@ -78,7 +78,8 @@ python3 .sdk/ztos/sdk/bin/ztos-sdk build                                     # -
 (cd ref && python3 ../.sdk/ztos/sdk/bin/ztos-sdk build)                      # -> ref/dist/dev.oneplus2.zuneref
 env -i HOME=$HOME PATH=/usr/bin:/bin python3 tests/compare.py                # confronto affiancato (soglie in ACCEPTANCE.md)
 env -i HOME=$HOME PATH=/usr/bin:/bin python3 tests/test_client.py             # test client vs slipmatd finto (fixture anonimizzate in tests/fixtures/)
-env -i HOME=$HOME PATH=/usr/bin:/bin QT_QPA_PLATFORM=offscreen python3 tests/test_player.py   # geometria Player + menu Opzioni su socket finto
+env -i HOME=$HOME PATH=/usr/bin:/bin QT_QPA_PLATFORM=offscreen python3 tests/test_player.py   # geometria Player (area utile 28/40) + menu Opzioni su socket finto
+env -i HOME=$HOME PATH=/usr/bin:/bin QT_QPA_PLATFORM=offscreen python3 tests/test_art.py      # fetcher artwork: download reale via HTTP locale + cache
 # screenshot Now Playing / menu Opzioni:
 ZTOS_SHOT_AFTER=6000 ZUNE_NAV=now     python3 .sdk/ztos/sdk/bin/ztos-sdk run --shot docs/shots/40-now-sdk.png
 ZTOS_SHOT_AFTER=6000 ZUNE_NAV=options python3 .sdk/ztos/sdk/bin/ztos-sdk run --shot docs/shots/41-options-sdk.png

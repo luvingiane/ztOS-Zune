@@ -117,7 +117,7 @@ class PlayerSeek(QWidget):
         f = self._frac()
         p.fillRect(QRectF(0, y, w, 3), QColor(255, 255, 255, 60))
         p.fillRect(QRectF(0, y, w * f, 3), QColor("white"))
-        p.setBrush(QColor("white"))
+        p.setBrush(ztos.accent())                  # accent dot, ztSettings color
         p.setPen(Qt.NoPen)
         p.drawEllipse(QPointF(w * f, y + 1.5), 5.5, 5.5)
         p.setPen(QColor(255, 255, 255, 170))
@@ -152,21 +152,31 @@ class PlayerSeek(QWidget):
         return 0.0 if self._dur <= 0 else max(0.0, min(1.0, x / max(1.0, self.width()))) * self._dur
 
 
+# ztOS shell chrome over the app window (ztmetro/ztmetro.c:128-131):
+# STATUS_H = 28 top, NAV_BAR_H = 40 bottom. The player must fit inside this.
+TOP_INSET = 28
+BOTTOM_INSET = 40
+
+
 class PlayerView(ztos.Entry):
-    """The whole Now Playing content: background, cover, texts, seek, controls."""
+    """Now Playing in metro key (owner: inspired by the original Slipmat
+    client with the wrapper theme, NOT a copy of the Zune demo screenshot):
+    big centered cover with a small shadow, blurred cover as background
+    (computed once per track: cover downscaled to 24x42, then upscaled to the
+    window — one small static image, no per-frame blur, no full-screen texture),
+    title thin + artist — album grey with ellipsis, one thin seek bar with an
+    accent dot (elapsed left, -remaining right), no volume, and the five
+    controls `queue prev play/pause next options` fully inside the usable area
+    (window minus status bar and nav bar)."""
 
     def __init__(self, app):
         super().__init__("", "")
         self._app = app
-        self.setFixedHeight(640)
         self._track = {}
-        self._cover_img = None
+        self._bg_small = None          # 24x42 blurred cover, cached per track
         # controls: coda, prev, play/pausa (grande), next, opzioni
         self.ctrl = {}
         sizes = {"queue": 46, "prev": 48, "play": 64, "next": 48, "more": 46}
-        total = sum(sizes.values())
-        gap = (360 - 32 - total) / 4.0
-        x = 16.0
         for kind, cb in (("queue", lambda: app.push(_queue_page())),
                          ("prev", lambda: backend.transport("previous")),
                          ("play", lambda: backend.transport("playPause")),
@@ -174,22 +184,54 @@ class PlayerView(ztos.Entry):
                          ("more", self._open_options)):
             b = CtrlButton(kind, on_tap=cb, size=sizes[kind])
             b.setParent(self)
-            b.move(int(round(x)), CTRL_Y + (64 - sizes[kind]) // 2)
-            b.show()
             self.ctrl[kind] = b
-            x += sizes[kind] + gap
         self._seek = PlayerSeek(on_seek=lambda s: backend.seek(s * 1000.0))
         self._seek.setParent(self)
-        self._seek.setGeometry(16, SEEK_Y, 360 - 32, 36)
-        self._seek.show()
-        self._cover = Artwork(COVER, "", "", art_size=512)
+        self._cover = Artwork(300, "", "", art_size=512)
         self._cover.setParent(self)
-        self._cover.move(COVER_X, COVER_Y)
-        self._cover.show()
         self._options = None
         self._ticker = QTimer(self, interval=1000)
         self._ticker.timeout.connect(self._tick)
         self._ticker.start()
+        self._layout()
+
+    def _usable(self):
+        win = self.window()
+        w = win.width() if win.width() > 1 else self.width()
+        h = win.height() if win.height() > 1 else self.height()
+        return w, h, TOP_INSET, max(0, h - TOP_INSET - BOTTOM_INSET)
+
+    def _layout(self):
+        w, h, top, usable_h = self._usable()
+        self.setFixedSize(w, h)
+        cover = min(w - 40, 300)
+        cx = (w - cover) // 2
+        cy = top + 16
+        self._cover.setFixedSize(cover, cover)
+        self._cover.move(cx, cy)
+        self._cover.show()
+        # controls row: bottom edge inside the usable area
+        sizes = {k: b.width() for k, b in self.ctrl.items()}
+        row_h = max(sizes.values())
+        row_y = top + usable_h - 10 - row_h
+        total = sum(sizes.values())
+        gap = max(8.0, (w - 32 - total) / 4.0)
+        x = 16.0
+        for kind in ("queue", "prev", "play", "next", "more"):
+            b = self.ctrl[kind]
+            b.move(int(round(x)), int(row_y + (row_h - sizes[kind]) / 2))
+            b.show()
+            x += sizes[kind] + gap
+        # seek above the controls
+        seek_h = 36
+        self._seek.setGeometry(16, int(row_y - 14 - seek_h), w - 32, seek_h)
+        self._seek.show()
+        self._cover_y = cy
+        self._cover_size = cover
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._layout()
 
     # ---- content -------------------------------------------------------------
     def set_track(self, t: dict):
@@ -200,6 +242,7 @@ class PlayerView(ztos.Entry):
         p = local_art(art, 512) if art else None
         if p and image_for(p) is not None:
             self._cover._img = image_for(p)
+        self._bg_small = None               # recompute the blurred background
         self._seek.set_times(t.get("position_ms", 0), t.get("duration_ms", 0))
         play = self.ctrl["play"]
         play._kind = "pause" if t.get("playing") else "play"
@@ -221,40 +264,40 @@ class PlayerView(ztos.Entry):
         self._options.raise_()
 
     # ---- drawing -------------------------------------------------------------
+    def _background(self, p: QPainter, w: float, h: float):
+        img = self._cover._img
+        if img is not None and not img.isNull():
+            if self._bg_small is None:
+                self._bg_small = img.scaled(24, 42, Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
+            p.setRenderHint(QPainter.SmoothPixmapTransform, True)
+            p.drawImage(QRectF(0, 0, w, h), self._bg_small)      # the "blur": tiny -> full
+            p.fillRect(QRectF(0, 0, w, h), QColor(0, 0, 0, 175))   # dark veil for legibility
+        else:
+            c1, c2 = cover_colors(self._track.get("album") or self._track.get("title") or "")
+            g = QLinearGradient(0, 0, w, h)
+            g.setColorAt(0.0, QColor(c2).darker(200))
+            g.setColorAt(1.0, QColor(0, 0, 0))
+            p.fillRect(QRectF(0, 0, w, h), g)
+
     def draw(self, p: QPainter):
         w, h = float(self.width()), float(self.height())
-        # background: gradient from the cover's colors, bright top-left to black
-        # bottom-right (no blur, no full-screen texture — perf budget)
-        c1, c2 = cover_colors(self._track.get("album") or self._track.get("title") or "")
-        g = QLinearGradient(0, 0, w, h)
-        g.setColorAt(0.0, QColor(c2).darker(150))
-        g.setColorAt(0.5, QColor(c1).darker(210))
-        g.setColorAt(1.0, QColor(0, 0, 0))
-        p.fillRect(QRectF(0, 0, w, h), g)
-        # giant almost-transparent word: the track title, lowercase
-        title = (self._track.get("title") or "").lower()
-        if title:
-            font = ztos._font(ztos.FONT_LIGHT, 190)
-            p.setFont(font)
-            p.setPen(QColor(255, 255, 255, 88))
-            fm = QFontMetricsF(font)
-            p.drawText(QRectF(-10, 250, w + 60, 260), Qt.AlignLeft | Qt.AlignVCenter,
-                       fm.elidedText(title, Qt.ElideRight, w + 60))
-        # cover shadow (cheap: one offset rect) + cover is a child widget on top
-        p.fillRect(QRectF(COVER_X + 5, COVER_Y + 6, COVER, COVER), QColor(0, 0, 0, 130))
-        # texts right of the cover
-        x = TEXT_X
+        self._background(p, w, h)
+        # cover shadow (one offset rect) — the cover itself is a child widget
+        cs, cx, cy = self._cover_size, self._cover.x(), self._cover.y()
+        p.fillRect(QRectF(cx + 6, cy + 8, cs, cs), QColor(0, 0, 0, 130))
+        # texts centered under the cover, one line each with ellipsis
+        ty = cy + cs + 18
         p.setPen(QColor("white"))
-        caps = ztos._font(ztos.FONT_SEMIBOLD, 15)
-        caps.setLetterSpacing(QFont.AbsoluteSpacing, 1.2)
-        p.setFont(caps)
-        p.drawText(QPointF(x, COVER_Y + 14), (self._track.get("title") or "").upper())
-        p.setPen(QColor(255, 255, 255, 190))
-        p.setFont(ztos._font(ztos.FONT_REGULAR, 14))
-        p.drawText(QPointF(x, COVER_Y + 36), self._track.get("album", ""))
-        p.setPen(QColor(255, 255, 255, 235))
-        p.setFont(ztos._font(ztos.FONT_LIGHT, 34))
-        p.drawText(QPointF(x, COVER_Y + 78), self._track.get("artist", ""))
+        p.setFont(ztos._font(ztos.FONT_LIGHT, 30))
+        fm = QFontMetricsF(p.font())
+        p.drawText(QRectF(16, ty, w - 32, 40), Qt.AlignHCenter,
+                   fm.elidedText(self._track.get("title", ""), Qt.ElideRight, w - 32))
+        p.setPen(QColor(255, 255, 255, 170))
+        p.setFont(ztos._font(ztos.FONT_REGULAR, 16))
+        fm2 = QFontMetricsF(p.font())
+        sub = f"{self._track.get('artist', '')} — {self._track.get('album', '')}".strip(" —")
+        p.drawText(QRectF(16, ty + 42, w - 32, 24), Qt.AlignHCenter,
+                   fm2.elidedText(sub, Qt.ElideRight, w - 32))
 
 
 class OptionsMenu(ztos.Entry):
@@ -272,7 +315,8 @@ class OptionsMenu(ztos.Entry):
         h = 12 + len(items) * self.ROW_H + 8
         self.setParent(host)
         self.setFixedHeight(h)                    # Entry fixes 45px otherwise
-        self.setGeometry(20, max(20, host.height() - h - 16), host.width() - 40, h)
+        bottom = host.height() - BOTTOM_INSET - 8
+        self.setGeometry(20, max(20, bottom - h), host.width() - 40, h)
         self._items = items
         self._row_hit = [self.ROW_H] * len(items)
 

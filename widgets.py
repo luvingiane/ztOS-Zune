@@ -6,6 +6,7 @@ canvas -> 15px grey rgba(255,255,255,0.5), duration at the right. Covers are
 plain gradients, never placeholder text (A2/N1).
 """
 import ztos
+import art as art_mod
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QFontMetricsF, QLinearGradient, QPainter
 
@@ -13,6 +14,7 @@ ROW_H = 71          # 59 canvas
 TITLE_PX = 24       # 20 canvas
 SUB_PX = 15         # 13 canvas
 LIST_X = 17         # 14 canvas
+THUMB = 48          # square artwork thumb on song rows
 
 
 def cover_colors(text: str):
@@ -40,26 +42,52 @@ def fmt_ms(ms) -> str:
 
 
 class Row(ztos.Entry):
-    """A list row: title, grey subtitle, duration at the right (L1/L2)."""
+    """A list row: optional 48px artwork thumb at the left (async from the
+    disk cache, neutral grey placeholder until it arrives — never letters),
+    title, grey subtitle, duration at the right (L1/L2)."""
 
     def __init__(self, title: str, subtitle: str = "", duration_ms: int = 0,
-                 on_tap=None, on_hold=None, accent: bool = False):
+                 on_tap=None, on_hold=None, accent: bool = False, art: str = ""):
         super().__init__(title, "", on_tap, on_hold)
         self.setFixedHeight(ROW_H)
         self._subtitle = subtitle
         self._duration = duration_ms
         self._accent = accent
+        self._art = art or ""
+        self._art_img = None
+        self._tx = THUMB + 12 if self._art else 0
+        if self._art:
+            p = art_mod.local_art(self._art, 300)
+            if p:
+                self._art_img = art_mod.image_for(p)
+            else:
+                art_mod._fetcher.add(self._art, 300)
+                art_mod._fetcher.done.connect(self._on_art)
+
+    def _on_art(self, template, path, ok):
+        if ok and template == self._art:
+            img = art_mod.image_for(path)
+            if img is not None and img is not self._art_img:
+                self._art_img = img
+                self.redraw()
+                self.content_changed()
 
     def draw(self, p: QPainter):
         p.setRenderHints(QPainter.Antialiasing | QPainter.TextAntialiasing)
+        if self._art:
+            r = QRectF(0, (self.height() - THUMB) / 2.0, THUMB, THUMB)
+            if self._art_img is not None and not self._art_img.isNull():
+                p.drawImage(r, self._art_img)
+            else:
+                p.fillRect(r, QColor(38, 38, 38))      # neutral placeholder, no text
         p.setPen(ztos.accent() if self._accent else QColor("white"))
         p.setFont(ztos._font(ztos.FONT_LIGHT, TITLE_PX))
         fm = QFontMetricsF(p.font())
-        p.drawText(QPointF(0, 30), fm.elidedText(self._title, Qt.ElideRight, self.width() - 70))
+        p.drawText(QPointF(self._tx, 30), fm.elidedText(self._title, Qt.ElideRight, self.width() - self._tx - 70))
         p.setPen(QColor(255, 255, 255, 127))
         p.setFont(ztos._font(ztos.FONT_REGULAR, SUB_PX))
         fm2 = QFontMetricsF(p.font())
-        p.drawText(QPointF(0, 58), fm2.elidedText(self._subtitle, Qt.ElideRight, self.width() - 90))
+        p.drawText(QPointF(self._tx, 58), fm2.elidedText(self._subtitle, Qt.ElideRight, self.width() - self._tx - 90))
         if self._duration:
             text = fmt_ms(self._duration)
             p.drawText(QPointF(self.width() - fm2.horizontalAdvance(text) - 2, 58), text)

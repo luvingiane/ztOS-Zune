@@ -15,6 +15,19 @@ from client import backend, rtitle
 from widgets import Row
 
 
+def _art_for(title: str, subtitle: str) -> str:
+    """Artwork template of a queue row: queue items carry no artwork, so look
+    the track up in the cached songs rows (by title + artist)."""
+    with backend._lock:
+        rows = backend._rows.get("songs")
+    if rows:
+        artist = subtitle.split(" — ")[0] if subtitle else ""
+        for r in rows:
+            if r.get("title") == title and (not artist or r.get("artist") == artist):
+                return r.get("artworkTemplate", "")
+    return ""
+
+
 class QueuePage(ztos.Page):
     """The queue: rows, current in accent; tap = jumpTo, hold = remove."""
 
@@ -36,6 +49,7 @@ class QueuePage(ztos.Page):
             self.add(Notice(backend.demo_notice or "demo data"))
         for i, it in enumerate(items):
             self.add(Row(rtitle(it), it.get("subtitle", ""), it.get("duration_ms", 0),
+                         art=_art_for(it.get("title", ""), it.get("subtitle", "")),
                          accent=(i == position),
                          on_tap=lambda i=i: backend.jump_to(i),
                          on_hold=lambda i=i: ztos.menu(self, [
@@ -96,6 +110,7 @@ class SearchPage(ztos.Page):
                                           (backend.demo_notice or "demo data")))
         for r in results:
             row = Row(rtitle(r), r.get("subtitle", ""), r.get("durationMs", 0),
+                      art=r.get("artworkTemplate", ""),
                       on_tap=(lambda r=r: self._open(r)))
             self.list.insertWidget(self.list.count() - 1, row)
 
@@ -103,8 +118,11 @@ class SearchPage(ztos.Page):
         import hub
         kind = r.get("kind")
         if kind == "song":
-            sid = r.get("catalogId") or r.get("id", "")
-            backend.play_ids([sid], 0)
+            sid = r.get("catalogId") or ""
+            if not sid:
+                ztos.notify("cannot play", "this track cannot be streamed (catalog_id is null)")
+            else:
+                backend.play_ids([sid], 0)
         elif kind in ("album", "artist", "playlist"):
             self._app_push(hub.DetailPage(r.get("pageKind", kind), r.get("id", "")))
 
