@@ -10,7 +10,7 @@ app bar's sort button, direction included, remembered between sessions.
 import ztos
 import screens
 import player
-from PySide6.QtCore import QPointF, QRectF, Qt
+from PySide6.QtCore import QPointF, QRectF, Qt, QTimer
 from PySide6.QtGui import QColor, QFontMetricsF, QPainter
 
 from art import Artwork, prewarm
@@ -99,6 +99,20 @@ class ListPage(ztos.Page):
         self._extend_timer.start()
         self._build_chunk()
         prewarm(rows[:60], GRID_ART)
+        QTimer.singleShot(6000, self._refresh_stale)
+
+    def _refresh_stale(self):
+        """Signed playlist URLs expire: if their fetch failed (art.stale),
+        ask the daemon once for fresh rows/URLs."""
+        import art
+        if not self.isVisible():
+            return
+        mine = {it.get("artworkTemplate", "") for it in self._all_items if it.get("artworkTemplate")}
+        hit = art.stale & mine
+        if hit:
+            art.stale -= hit
+            sort, reverse = get_sort(self.view)
+            backend.browse_async(self.view, sort, reverse, cb=self._on_rows)
 
     def _build_chunk(self):
         end = min(len(self._all_items), self._built + self.CHUNK)
@@ -277,11 +291,33 @@ class DetailPage(ztos.Page):
             self.add(Notice(backend.demo_notice or "demo data"))
         self._entries = entries
         self._header = header
+        if "playlist" in (self._kind or "") and not header.get("artworkTemplate") and entries:
+            import art as _art
+            paths = [_art.local_art(e.get("artworkTemplate", ""), 300) for e in entries[:4]]
+            paths = [p for p in paths if p]
+            if len(paths) == len([e for e in entries[:4] if e.get("artworkTemplate")]):
+                mosaic = _art.mosaic_image(paths, 300)
+                if mosaic is not None:
+                    self._mosaic = mosaic
         self._header_block(header)
-        for e in entries:
+        np = backend.now_playing()
+        for i, e in enumerate(entries):
+            cur = (np.get("title") == rtitle(e) and np.get("artist") == e.get("artist", ""))
             self.add(Row(rtitle(e), e.get("subtitle", ""), e.get("durationMs", 0),
-                         art=e.get("artworkTemplate", "")))
+                         art=e.get("artworkTemplate", ""), accent=cur,
+                         on_tap=lambda i=i: self._play_from(i)))
         prewarm([header] + entries, GRID_ART)
+
+    def _play_from(self, i):
+        """Tap a track row: play from that row, the rest of the list in queue
+        (play {ids, index} like the original: track_row.rs / link.rs)."""
+        import player
+        ztos.haptic("tap")
+        sent, reason = backend.play_list(self._entries, i)
+        if not sent:
+            ztos.notify("cannot play", reason or "slipmatd not ready")
+            return
+        ztos.App.current.push(player.NowPlaying(ztos.App.current))
 
     def _header_block(self, header):
         from PySide6.QtWidgets import QWidget, QHBoxLayout
@@ -290,6 +326,8 @@ class DetailPage(ztos.Page):
         lay.setContentsMargins(0, 10, 0, 10)
         lay.setSpacing(14)
         cover = Artwork(140, rtitle(header), header.get("artworkTemplate", ""), 300)
+        if getattr(self, "_mosaic", None) is not None:
+            cover._img = self._mosaic
         lay.addWidget(cover)
         texts = QWidget()
         from PySide6.QtWidgets import QVBoxLayout, QLabel
@@ -313,11 +351,12 @@ class DetailPage(ztos.Page):
         lay.addWidget(texts, 1)
         self.add(row)
         # action row: play / shuffle / queue / more (detail_page.rs header buttons)
+        import player as _player
         actions = self.round_buttons(
-            ztos.RoundButton("play", "play", self._play_all),
-            ztos.RoundButton("shuffle", "shuffle", self._play_shuffled),
-            ztos.RoundButton("more", "queue", self._enqueue_all),
-            ztos.RoundButton("more", "more", self._more_menu))
+            _player.CtrlButton("play", self._play_all, 52),
+            _player.CtrlButton("shuffle", self._play_shuffled, 52),
+            _player.CtrlButton("queue", self._enqueue_all, 52),
+            _player.CtrlButton("more", self._more_menu, 52))
         self.space(4)
 
     def _play_all(self):

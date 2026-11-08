@@ -29,31 +29,97 @@ def _art_for(title: str, subtitle: str) -> str:
 
 
 class QueuePage(ztos.Page):
-    """The queue: rows, current in accent; tap = jumpTo, hold = remove."""
+    """The queue. Rebuilt only when the CONTENT changes (signature of
+    id+title), never on position-only events — a queue event storm used to
+    freeze the page. Rows: tap = jumpTo, hold = remove, long-press + drag =
+    reorder (moveInQueue, ipc.rs:236-238)."""
 
     def __init__(self):
         super().__init__("queue")
         self.list.setContentsMargins(17, 0, 16, 24)
         self.bar(ztos.RoundButton("delete", "clear", self._clear))
-        backend.queue_changed.connect(self._maybe_refill)
-
-    def _maybe_refill(self):
-        if self.isVisible():
-            self.shown()
+        self._sig = None
+        self._row_widgets = []
+        self._drag_from = None
+        self._drag_over = None
+        backend.queue_changed.connect(self._on_queue_event)
 
     def shown(self):
-        self.clear()
+        self._fill(backend.queue_items())
+
+    def _on_queue_event(self):
+        if not self.isVisible():
+            return
         items, position = backend.queue_items()
+        sig = tuple((i.get("id"), i.get("title")) for i in items)
+        if sig == self._sig:
+            # position/accent only: repaint accents in place, NO rebuild
+            for idx, row in enumerate(self._row_widgets):
+                if row._accent != (idx == position):
+                    row._accent = (idx == position)
+                    row.redraw()
+                    row.content_changed()
+            return
+        self._fill((items, position))
+
+    def _fill(self, q):
+        items, position = q
+        self.clear()
+        self._row_widgets = []
+        self._sig = tuple((i.get("id"), i.get("title")) for i in items)
         if not backend.live:
             from hub import Notice
             self.add(Notice(backend.demo_notice or "demo data"))
         for i, it in enumerate(items):
-            self.add(Row(rtitle(it), it.get("subtitle", ""), it.get("duration_ms", 0),
-                         art=_art_for(it.get("title", ""), it.get("subtitle", "")),
-                         accent=(i == position),
-                         on_tap=lambda i=i: backend.jump_to(i),
-                         on_hold=lambda i=i: ztos.menu(self, [
-                             ("remove from queue", lambda i=i: backend.remove_from_queue(i))])))
+            r = Row(rtitle(it), it.get("subtitle", ""), it.get("duration_ms", 0),
+                    art=_art_for(it.get("title", ""), it.get("subtitle", "")),
+                    accent=(i == position),
+                    on_tap=lambda i=i: backend.jump_to(i),
+                    on_hold=lambda i=i: self._start_drag(i))
+            r.installEventFilter(self)
+            self._row_widgets.append(r)
+            self.add(r)
+
+    # ---- drag to reorder ---------------------------------------------------
+    def _start_drag(self, index):
+        # long-press: enter reorder mode; let mouse moves reach the rows
+        # (the SDK finger filter would otherwise eat them as a scroll)
+        self._drag_from = index
+        self._drag_over = index
+        try:
+            ztos.App.current._finger.active = False
+        except Exception:
+            pass
+        ztos.haptic("tap")
+
+    def eventFilter(self, obj, event):
+        from PySide6.QtCore import QEvent
+        # NB: Qt can call eventFilter during QWidget.__init__, before our
+        # attributes exist — always getattr-guard here
+        if getattr(self, "_drag_from", None) is not None:
+            if event.type() == QEvent.MouseMove:
+                y = obj.y() + event.position().y()
+                idx = max(0, min(len(self._row_widgets) - 1, int(y // 71)))
+                if idx != self._drag_over:
+                    self._drag_over = idx
+                    for i, r in enumerate(self._row_widgets):
+                        hl = (i == self._drag_over)
+                        if r._accent != hl:
+                            r._accent = hl
+                            r.redraw()
+                            r.content_changed()
+            elif event.type() == QEvent.MouseButtonRelease:
+                frm, to = self._drag_from, self._drag_over
+                self._drag_from = None
+                self._drag_over = None
+                try:
+                    ztos.App.current._finger.active = True
+                except Exception:
+                    pass
+                if frm is not None and to is not None and frm != to:
+                    backend.move_in_queue(frm, to)
+                    self.shown()
+        return False
 
     def _clear(self):
         backend.clear_queue()
@@ -143,6 +209,9 @@ class SettingsPage(ztos.Page):
         self.entry("quit", "stop slipmatd", lambda: backend.quit_daemon())
         self.space(8)
         self._stage_row = self.entry("daemon", "…", on_hold=None)
+        st = ztos.store("zunehd")
+        self.toggle("Notifiche cambio brano", on=bool(st.get("notify_track", False)),
+                    on_change=lambda on: (st.__setitem__("notify_track", on), st.save()))
         self.entry("about", "", self._about)
         backend.stage_changed.connect(lambda _s: self._refresh_stage())
         backend.error.connect(lambda e: ztos.notify("slipmatd", e))

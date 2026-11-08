@@ -33,3 +33,11 @@ Original frontend: `~/oneplus2/build/slipmat/Slipmat-0.12.0/crates/slipmat/src`
 
 Legend: fatta = implementata e testata; parziale = presente con périmètre ridotto;
 manca = non implementata (con motivo).
+
+| Tap a track row plays from that row (`play{ids,index}`) | **fatta (stage 6)** | `hub.DetailPage._play_from` → `backend.play_list` |
+| Queue drag-to-reorder (`MoveInQueue`) | **fatta (stage 6)** | `screens.QueuePage` long-press+drag → `moveInQueue{from,to}`; no rebuild on position-only events |
+| Live tile (TILE-SIGNALS.md) | **fatta (stage 6)** | `client.py` su snapshot → `ztos.tile_update`; clear se stop |
+| Track-change notifications off by default (`settings.rs:122,385-387`) | **fatta (stage 6)** | toggle in Impostazioni, default off |
+| Playlist mosaic 2x2 (`components/mosaic.rs`) | **fatta (stage 6)** | `art.mosaic_image` + header playlist senza artwork |
+| Signed/expiring artwork URLs | **fatta (stage 6)** | cache per hash URL, `art.stale` → re-browse |
+| Seek position model (monotonic, staleness guard) | **fatta (stage 6)** | `player.PlayerSeek.anchor/current_pos` |

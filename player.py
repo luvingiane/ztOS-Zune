@@ -18,9 +18,11 @@ Layout (360x640 logici, misurati sul riferimento):
   repeat. Le voci non fattibili (scarica, condividi, stazione, ecc.) sono
   documentate in PLAYER-OPTIONS.md e NON compaiono (niente voci finte).
 """
+import time
+
 import ztos
 from PySide6.QtCore import QPointF, QRectF, Qt, QTimer
-from PySide6.QtGui import QColor, QFont, QFontMetricsF, QLinearGradient, QPainter, QPainterPath, QPen
+from PySide6.QtGui import QColor, QFont, QFontMetricsF, QImage, QLinearGradient, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QWidget
 
 from art import Artwork, local_art, image_for
@@ -75,6 +77,18 @@ class CtrlButton(ztos.RoundButton):
             p.drawRect(QRectF(cx + s * 0.78, cy - s, s * 0.22, 2 * s))
             p.drawPolygon([QPointF(cx - s * 0.9, cy - s), QPointF(cx - s * 0.9, cy + s),
                            QPointF(cx + s * 0.55, cy)])
+        elif k == "shuffle":
+            p.setPen(QPen(QColor("white"), 2.2, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+            p.drawLine(QPointF(cx - s, cy - s * 0.45), QPointF(cx + s * 0.2, cy - s * 0.45))
+            p.drawLine(QPointF(cx - s, cy + s * 0.45), QPointF(cx + s * 0.2, cy + s * 0.45))
+            p.drawLine(QPointF(cx - s * 0.2, cy - s * 0.45), QPointF(cx + s, cy + s * 0.45))
+            p.drawLine(QPointF(cx - s * 0.2, cy + s * 0.45), QPointF(cx + s, cy - s * 0.45))
+            p.setBrush(QColor("white"))
+            p.setPen(Qt.NoPen)
+            p.drawPolygon([QPointF(cx + s - 2, cy + s * 0.45 - 4), QPointF(cx + s + 2, cy + s * 0.45),
+                           QPointF(cx + s - 2, cy + s * 0.45 + 4)])
+            p.drawPolygon([QPointF(cx + s - 2, cy - s * 0.45 + 4), QPointF(cx + s + 2, cy - s * 0.45),
+                           QPointF(cx + s - 2, cy - s * 0.45 - 4)])
         elif k == "queue":            # coda: list glyph
             p.setPen(QPen(QColor("white"), 2.0, Qt.SolidLine, Qt.RoundCap))
             for i, yy in enumerate((-s * 0.55, 0.0, s * 0.55)):
@@ -100,14 +114,56 @@ class PlayerSeek(QWidget):
         self._seeking = False
         self._scrub = 0.0
         self._on_seek = on_seek
+        # robust position model: anchor = (position, monotonic receive time);
+        # while playing the displayed position interpolates monotonically and
+        # NEVER goes backward; a snapshot that arrives late/stale (lower than
+        # displayed) is accepted only after an explicit seek, a track change
+        # or pause; redraws are skipped when the difference is < 150 ms.
+        self._anchor_pos = 0.0      # seconds
+        self._anchor_t = 0.0        # time.monotonic() of the anchor
+        self._playing = False
+        self._track_key = ""
+        self._last_drawn = -1.0
 
     def set_times(self, pos_ms, dur_ms):
+        """Backward-compatible raw setter (used by tests/explicit seek)."""
+        self._anchor_pos = pos_ms / 1000.0
+        self._anchor_t = time.monotonic()
+        self._dur = dur_ms / 1000.0
+        self._last_drawn = -1.0
         if not self._seeking:
-            self._pos, self._dur = pos_ms / 1000.0, dur_ms / 1000.0
             self.update()
 
+    def anchor(self, pos_ms, dur_ms, playing, track_key=""):
+        """Anchor to a daemon snapshot, with staleness guard."""
+        import time as _t
+        now_pos = self.current_pos()
+        new_pos = pos_ms / 1000.0
+        track_changed = track_key != self._track_key
+        self._track_key = track_key
+        self._dur = dur_ms / 1000.0
+        self._playing = bool(playing)
+        if not self._seeking:
+            backward = new_pos < now_pos - 0.150
+            if backward and not track_changed and playing and self._playing:
+                pass                      # stale/out-of-order snapshot: ignore
+            else:
+                self._anchor_pos = new_pos
+                self._anchor_t = _t.monotonic()
+                if abs(new_pos - self._last_drawn) >= 0.150:
+                    self._last_drawn = new_pos
+                    self.update()
+
+    def current_pos(self):
+        import time as _t
+        pos = self._anchor_pos
+        if self._playing and not self._seeking:
+            pos = min(self._dur if self._dur > 0 else pos,
+                      pos + (_t.monotonic() - self._anchor_t))
+        return pos
+
     def _frac(self):
-        return 0.0 if self._dur <= 0 else min(1.0, (self._scrub if self._seeking else self._pos) / self._dur)
+        return 0.0 if self._dur <= 0 else min(1.0, (self._scrub if self._seeking else self.current_pos()) / self._dur)
 
     def paintEvent(self, event):
         p = QPainter(self)
@@ -123,8 +179,9 @@ class PlayerSeek(QWidget):
         p.setPen(QColor(255, 255, 255, 170))
         p.setFont(ztos._font(ztos.FONT_REGULAR, 13))
         fm = QFontMetricsF(p.font())
-        elapsed = fmt_ms(self._pos * 1000) if not self._seeking else fmt_ms(self._scrub * 1000)
-        remaining = fmt_ms(max(0.0, self._dur - (self._scrub if self._seeking else self._pos)) * 1000)
+        cur = self._scrub if self._seeking else self.current_pos()
+        elapsed = fmt_ms(cur * 1000)
+        remaining = fmt_ms(max(0.0, self._dur - cur) * 1000)
         p.drawText(QPointF(0, 30), elapsed)
         p.drawText(QPointF(w - fm.horizontalAdvance("-" + remaining), 30), "-" + remaining)
 
@@ -142,7 +199,9 @@ class PlayerSeek(QWidget):
     def mouseReleaseEvent(self, event):
         if self._seeking:
             self._seeking = False
-            self._pos = self._scrub
+            self._anchor_pos = self._scrub
+            self._anchor_t = time.monotonic()
+            self._last_drawn = self._scrub
             ztos.haptic("tap")
             if self._on_seek:
                 self._on_seek(self._scrub)
@@ -150,6 +209,66 @@ class PlayerSeek(QWidget):
 
     def _x(self, x):
         return 0.0 if self._dur <= 0 else max(0.0, min(1.0, x / max(1.0, self.width()))) * self._dur
+
+
+def make_blur_bg(img, w: int, h: int, small_w: int = 120, passes: int = 3):
+    """Real blur at low cost, computed ONCE per track: downscale to ~120 px
+    wide (smooth), 3 box-blur passes over the bytes of the small image, then a
+    single bilinear upscale to the window. No per-frame blur, no full-screen
+    texture upload beyond the static result."""
+    import time as _t
+    t0 = _t.perf_counter()
+    small = img.scaled(small_w, max(1, int(small_w * img.height() / max(1, img.width()))),
+                       Qt.KeepAspectRatio, Qt.SmoothTransformation)
+    small = small.convertToFormat(QImage.Format_RGB32)
+    sw, sh = small.width(), small.height()
+    buf = small.bits()
+    n = sw * sh * 4
+    data = bytearray(buf[:n])
+    r = 6
+    for _ in range(passes):
+        # horizontal
+        out = bytearray(n)
+        for y in range(sh):
+            row = y * sw * 4
+            acc = [0, 0, 0, 0]
+            for x in range(-r, r + 1):
+                i = row + max(0, min(sw - 1, x)) * 4
+                for c in range(4):
+                    acc[c] += data[i + c]
+            cnt = 2 * r + 1
+            for x in range(sw):
+                i = row + x * 4
+                for c in range(4):
+                    out[i + c] = acc[c] // cnt
+                xi = row + max(0, min(sw - 1, x + r + 1)) * 4
+                xj = row + max(0, min(sw - 1, x - r)) * 4
+                for c in range(4):
+                    acc[c] += data[xi + c] - data[xj + c]
+        data = out
+        # vertical
+        out = bytearray(n)
+        for x in range(sw):
+            acc = [0, 0, 0, 0]
+            for y in range(-r, r + 1):
+                i = (max(0, min(sh - 1, y)) * sw + x) * 4
+                for c in range(4):
+                    acc[c] += data[i + c]
+            cnt = 2 * r + 1
+            for y in range(sh):
+                i = (y * sw + x) * 4
+                for c in range(4):
+                    out[i + c] = acc[c] // cnt
+                yi = (max(0, min(sh - 1, y + r + 1)) * sw + x) * 4
+                yj = (max(0, min(sh - 1, y - r)) * sw + x) * 4
+                for c in range(4):
+                    acc[c] += data[yi + c] - data[yj + c]
+        data = out
+    small2 = QImage(data, sw, sh, QImage.Format_RGB32)
+    bg = small2.scaled(w, h, Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
+    print(f"zunehd blur-bg: {small_w}px + {passes} box passes + upscale in {(_t.perf_counter()-t0)*1000:.1f} ms",
+          file=__import__("sys").stderr, flush=True)
+    return bg
 
 
 # ztOS shell chrome over the app window (ztmetro/ztmetro.c:128-131):
@@ -173,7 +292,7 @@ class PlayerView(ztos.Entry):
         super().__init__("", "")
         self._app = app
         self._track = {}
-        self._bg_small = None          # 24x42 blurred cover, cached per track
+        self._bg_full = None           # blurred full-screen bg, computed once per track
         # controls: coda, prev, play/pausa (grande), next, opzioni
         self.ctrl = {}
         sizes = {"queue": 46, "prev": 48, "play": 64, "next": 48, "more": 46}
@@ -242,8 +361,10 @@ class PlayerView(ztos.Entry):
         p = local_art(art, 512) if art else None
         if p and image_for(p) is not None:
             self._cover._img = image_for(p)
-        self._bg_small = None               # recompute the blurred background
-        self._seek.set_times(t.get("position_ms", 0), t.get("duration_ms", 0))
+        self._bg_full = None                # recompute the blurred background
+        self._seek.anchor(t.get("position_ms", 0), t.get("duration_ms", 0),
+                          t.get("playing", False),
+                          track_key=f"{t.get('title', '')}|{t.get('artist', '')}|{t.get('track_id', '')}")
         play = self.ctrl["play"]
         play._kind = "pause" if t.get("playing") else "play"
         play.redraw()
@@ -252,10 +373,10 @@ class PlayerView(ztos.Entry):
         self.content_changed()
 
     def _tick(self):
-        if self._track.get("playing") and self._track.get("duration_ms"):
-            self._track["position_ms"] = min(self._track["duration_ms"],
-                                              self._track.get("position_ms", 0) + 1000)
-            self._seek.set_times(self._track["position_ms"], self._track["duration_ms"])
+        # just repaint the seek bar; the position itself is the anchored,
+        # monotonic interpolation in PlayerSeek.current_pos()
+        if self._track.get("playing") and self._seek.isVisible():
+            self._seek.update()
 
     def _open_options(self):
         host = self.window()
@@ -267,11 +388,11 @@ class PlayerView(ztos.Entry):
     def _background(self, p: QPainter, w: float, h: float):
         img = self._cover._img
         if img is not None and not img.isNull():
-            if self._bg_small is None:
-                self._bg_small = img.scaled(24, 42, Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
+            if self._bg_full is None:
+                self._bg_full = make_blur_bg(img, int(w), int(h))   # once per track
             p.setRenderHint(QPainter.SmoothPixmapTransform, True)
-            p.drawImage(QRectF(0, 0, w, h), self._bg_small)      # the "blur": tiny -> full
-            p.fillRect(QRectF(0, 0, w, h), QColor(0, 0, 0, 175))   # dark veil for legibility
+            p.drawImage(QRectF(0, 0, w, h), self._bg_full)
+            p.fillRect(QRectF(0, 0, w, h), QColor(0, 0, 0, 165))   # dark veil for legibility
         else:
             c1, c2 = cover_colors(self._track.get("album") or self._track.get("title") or "")
             g = QLinearGradient(0, 0, w, h)
@@ -415,14 +536,22 @@ def _draw_menu_icon(p: QPainter, name: str, size: float, cy: float):
 
 
 class NowPlaying(ztos.Page):
-    """The Now Playing page: one PlayerView filling it. Back pops it."""
+    """The Now Playing page: one PlayerView filling it. Back pops it.
+    The page must NOT scroll or rubber-band with the finger (content is exactly
+    the window height): drags and flings are no-ops here."""
 
     def __init__(self, app):
-        super().__init__("", header=False)
+        super().__init__("", header=False, scroll=False)
         self.list.setContentsMargins(0, 0, 0, 0)
         self.view = PlayerView(app)
         self.add(self.view)
         backend.snapshot_changed.connect(self._refresh)
+
+    def _drag_to(self, raw):
+        pass                        # no vertical drag on the player
+
+    def _fling(self, v):
+        pass
 
     def shown(self):
         self._refresh()

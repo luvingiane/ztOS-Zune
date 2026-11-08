@@ -271,14 +271,34 @@ class Backend(QObject):
             prev = self.snapshot or {}
             self.snapshot = ev
             self.snapshot_changed.emit()
-            # track-change notification, like notify.rs:34 in the original
+            # track-change notification — OFF by default, toggle in Settings
+            # (the original's key is notify-track-change in its settings file,
+            #  slipmat/src/settings.rs:122,191,222-223; ours: ztos.store)
             if prev and ev.get("title") and ev.get("title") != prev.get("title"):
                 try:
                     import ztos
-                    ztos.notify(ev.get("title", ""),
-                                f"{ev.get('artist', '')} — {ev.get('album', '')}".strip(" —"))
+                    if ztos.store("zunehd").get("notify_track", False):
+                        ztos.notify(ev.get("title", ""),
+                                    f"{ev.get('artist', '')} — {ev.get('album', '')}".strip(" —"))
                 except Exception:
                     pass
+            # live tile (ztmetro/TILE-SIGNALS.md): key = app id, file
+            # $XDG_RUNTIME_DIR/ztos-live/<id>, atomic replace
+            try:
+                import ztos
+                if ev.get("title"):
+                    dur = ev.get("duration_ms") or 0
+                    pos = ev.get("position_ms") or 0
+                    art = ev.get("art_path") or ""
+                    ztos.tile_update("Playing" if ev.get("playing") else "Paused",
+                                     [ev.get("title", ""), ev.get("artist", "")],
+                                     image=art if art and os.path.exists(art) else "",
+                                     progress=int(100 * pos / dur) if dur else 0,
+                                     badge="play" if ev.get("playing") else "pause")
+                else:
+                    ztos.tile_clear()
+            except Exception:
+                pass
         elif tag == "queue":
             self.queue = ev
             self.queue_changed.emit()
@@ -498,6 +518,11 @@ class Backend(QObject):
         return self._send(self._client.sign_out) if self.live else False
 
     def quit_daemon(self):
+        try:
+            import ztos
+            ztos.tile_clear()
+        except Exception:
+            pass
         return self._send(self._client.quit) if self.live else False
 
 

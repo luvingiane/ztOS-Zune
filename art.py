@@ -16,7 +16,7 @@ import urllib.request
 
 import ztos
 from PySide6.QtCore import QObject, QRectF, Qt, QThread, Signal
-from PySide6.QtGui import QImage, QPainter
+from PySide6.QtGui import QColor, QImage, QPainter
 
 from slipmat.ipc import art_url
 
@@ -32,17 +32,27 @@ def _fnv1a(text: str) -> str:
 
 
 def cache_path(template: str, size: int) -> str:
+    template = str(template)
+    if "{w}" not in template:
+        # signed/plain URL (no template, e.g. expiring playlist art): one cache
+        # entry per URL itself
+        return os.path.join(CACHE_DIR, f"{_fnv1a(template)}.jpg")
     return os.path.join(CACHE_DIR, f"{_fnv1a(template)}-{size}.jpg")
 
 
+stale = set()     # URLs whose fetch failed (signed ones expire -> re-browse)
+
+
 def local_art(path_or_template, size: int = 512):
-    """A local file for this artwork if we already have it (no network)."""
+    """A local file for this artwork if we already have it (no network).
+    Handles both template URLs ({w}x{h}) and plain/signed URLs."""
     if not path_or_template:
         return None
-    if os.path.isabs(str(path_or_template)) and os.path.exists(path_or_template):
-        return str(path_or_template)                  # snapshot's art_path
-    if "{w}" in str(path_or_template):
-        p = cache_path(str(path_or_template), size)
+    path_or_template = str(path_or_template)
+    if os.path.isabs(path_or_template) and os.path.exists(path_or_template):
+        return path_or_template                       # snapshot's art_path
+    if path_or_template.startswith("http"):
+        p = cache_path(path_or_template, size)
         return p if os.path.exists(p) else None
     return None
 
@@ -82,7 +92,7 @@ class _FetchThread(QThread):
 
     def add(self, template, size):
         template = str(template)
-        if not template or "{w}" not in template:
+        if not template or not template.startswith("http"):
             return
         p = cache_path(template, size)
         if os.path.exists(p):
@@ -112,6 +122,7 @@ class _FetchThread(QThread):
                 _evict_cache()
                 ok = True
             except Exception as exc:
+                stale.add(template)          # signed URLs expire: caller re-browses
                 print(f"zunehd art: fetch failed for {url}: {exc}", flush=True)
                 try:
                     os.unlink(tmp)
@@ -244,3 +255,28 @@ class Artwork(ztos.Entry):
         else:
             from widgets import draw_cover
             draw_cover(p, rect, self._cover_title)
+
+
+def mosaic_image(paths, size: int = 300):
+    """2x2 mosaic of the first four cached covers (Apple playlists often have
+    no artwork of their own — the original composes one, mosaic.rs:4-29)."""
+    from PySide6.QtGui import QImage, QPainter
+    imgs = [image_for(p) for p in paths[:4]]
+    imgs = [i for i in imgs if i is not None and not i.isNull()]
+    if not imgs:
+        return None
+    out = QImage(size, size, QImage.Format_RGB32)
+    out.fill(QColor(38, 38, 38))
+    p = QPainter(out)
+    n = len(imgs)
+    cell = size // 2
+    for i, im in enumerate(imgs):
+        x, y = (i % 2) * cell, (i // 2) * cell
+        p.drawImage(QRectF(x, y, cell, cell), im)
+    p.end()
+    # disk cache named after the four source keys (mosaic.rs:23-29)
+    key = "".join(_fnv1a(str(p_)) for p_ in paths[:4])
+    mp = os.path.join(CACHE_DIR, f"mosaic-{key}.jpg")
+    out.save(mp, "JPG")
+    _images[mp] = out
+    return out
