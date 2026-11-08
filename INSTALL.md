@@ -33,6 +33,22 @@ DESKTOP
 # fa rileggere la lista app alla shell:
 printf 'apps\n' > "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/ztmetro.ctl"   # su B dentro ztOS
 
+# voce extra "Zune HD (profile)" per la profilazione CPU su B (ZUNE_PROFILE=1 ZUNE_PERF=1, vedi PROFILE-ON-B.md):
+ssh <user>@<phone-ip> 'cat > ~/.local/share/applications/dev.oneplus2.zunehd-profile.desktop' <<'DESKTOP'
+[Desktop Entry]
+Type=Application
+Name=Zune HD (profile)
+Comment=Zune HD con profiler CPU attivo (ZUNE_PROFILE=1 ZUNE_PERF=1)
+Exec=env ZUNE_PROFILE=1 ZUNE_PERF=1 /home/zerone/.local/share/ztos/apps/dev.oneplus2.zunehd
+Icon=dev.oneplus2.zunehd
+Terminal=false
+StartupWMClass=ztos.dev.oneplus2.zunehd
+Categories=Audio;Music;
+X-ZtOS-Id=dev.oneplus2.zunehd
+X-ZtOS-Version=0.1.0
+DESKTOP
+# (stesso id: la voce di menu si aggiunge a quella normale)
+
 # .desktop + icona dell'app di riferimento (zuneref):
 ssh <user>@<phone-ip> 'cat > ~/.local/share/icons/hicolor/scalable/apps/dev.oneplus2.zuneref.svg' < ref/icon.svg
 ssh <user>@<phone-ip> 'cat > ~/.local/share/applications/dev.oneplus2.zuneref.desktop' <<'DESKTOP'

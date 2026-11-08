@@ -15,7 +15,7 @@ from PySide6.QtGui import QColor, QFontMetricsF, QPainter
 
 from art import Artwork, prewarm
 from client import backend, rtitle, SORTS, SORT_LABELS
-from widgets import Row, Cover, LIST_X, fmt_ms
+from widgets import Row, Cover, LIST_X, fmt_ms, ROW_H
 
 GRID_ART = 300       # artwork size requested for grid cells (cell is 104 logical)
 
@@ -59,13 +59,19 @@ def set_sort(view: str, sort: str, reverse: bool):
 
 
 class ListPage(ztos.Page):
-    """A collection page of rows; `view` is the slipmatd View name."""
+    """A collection page of rows; `view` is the slipmatd View name.
+    Long lists are built in chunks (only the visible + buffer rows exist as
+    widgets), so filling a 500-song list never blocks the GUI thread."""
 
     view = ""
+    CHUNK = 40
 
     def __init__(self, title: str):
         super().__init__(title, header=False)
         self.list.setContentsMargins(LIST_X, 0, 16, 24)
+        self._all_items = []
+        self._built = 0
+        self._extend_timer = None
 
     def shown(self):
         # show the page at once (title/loading), fill when the data arrives:
@@ -84,14 +90,33 @@ class ListPage(ztos.Page):
             self.add(Notice(backend.demo_notice or "demo data"))
         elif not rows:
             self.add(Notice(f"error: {backend.last_error}" if backend.last_error else "empty"))
-        self.build(rows)
-        prewarm(rows, GRID_ART)
+        self._all_items = rows
+        self._items = rows            # all items (SongsPage plays from this list)
+        self._built = 0
+        from PySide6.QtCore import QTimer
+        self._extend_timer = QTimer(self, interval=150)
+        self._extend_timer.timeout.connect(self._maybe_extend)
+        self._extend_timer.start()
+        self._build_chunk()
+        prewarm(rows[:60], GRID_ART)
+
+    def _build_chunk(self):
+        end = min(len(self._all_items), self._built + self.CHUNK)
+        for i in range(self._built, end):
+            self.add(self.make_row(self._all_items[i], i))
+        self._built = end
+
+    def _maybe_extend(self):
+        view_h = self.viewport.height() if self.viewport.height() > 1 else 500
+        if self._scroll + view_h * 2 > self._built * ROW_H and self._built < len(self._all_items):
+            self._build_chunk()
+            prewarm(self._all_items[self._built:self._built + 60], GRID_ART)
+
+    def make_row(self, item, index):
+        raise NotImplementedError
 
     def fill(self):
         self.shown()
-
-    def build(self, rows):
-        raise NotImplementedError
 
 
 class ArtistsPage(ListPage):
@@ -101,12 +126,11 @@ class ArtistsPage(ListPage):
         super().__init__("artists")
         self._app = app
 
-    def build(self, rows):
-        for a in rows:
-            self.add(Row(rtitle(a), a.get("subtitle", ""),
-                         art=a.get("artworkTemplate", ""),
-                         on_tap=lambda a=a: self._app.push(DetailPage(a.get("pageKind", "artist"),
-                                                                     a.get("id", ""), rtitle(a)))))
+    def make_row(self, a, index):
+        return Row(rtitle(a), a.get("subtitle", ""),
+                   art=a.get("artworkTemplate", ""),
+                   on_tap=lambda a=a: self._app.push(DetailPage(a.get("pageKind", "artist"),
+                                                                a.get("id", ""), rtitle(a))))
 
 
 class SongsPage(ListPage):
@@ -117,13 +141,11 @@ class SongsPage(ListPage):
         self._app = app
         self._items = []
 
-    def build(self, rows):
-        self._items = rows
-        for i, s in enumerate(rows):
-            self.add(Row(rtitle(s), s.get("subtitle", ""), s.get("durationMs", 0),
-                         art=s.get("artworkTemplate", ""),
-                         on_tap=lambda i=i: self._play(i),
-                         on_hold=lambda s=s: self._menu(s)))
+    def make_row(self, s, i):
+        return Row(rtitle(s), s.get("subtitle", ""), s.get("durationMs", 0),
+                   art=s.get("artworkTemplate", ""),
+                   on_tap=lambda i=i: self._play(i),
+                   on_hold=lambda s=s: self._menu(s))
 
     def _play(self, i):
         import player
@@ -154,12 +176,11 @@ class PlaylistsPage(ListPage):
         super().__init__("playlists")
         self._app = app
 
-    def build(self, rows):
-        for pl in rows:
-            self.add(Row(rtitle(pl), pl.get("subtitle", ""),
-                         art=pl.get("artworkTemplate", ""),
-                         on_tap=lambda pl=pl: self._app.push(DetailPage(pl.get("pageKind", "playlist"),
-                                                                        pl.get("id", ""), rtitle(pl)))))
+    def make_row(self, pl, index):
+        return Row(rtitle(pl), pl.get("subtitle", ""),
+                   art=pl.get("artworkTemplate", ""),
+                   on_tap=lambda pl=pl: self._app.push(DetailPage(pl.get("pageKind", "playlist"),
+                                                                  pl.get("id", ""), rtitle(pl))))
 
 
 class AlbumGrid(ztos.Entry):
@@ -210,11 +231,20 @@ class AlbumsPage(ListPage):
         self._app = app
         self._grid = None
 
-    def build(self, rows):
+    def make_row(self, al, index):
+        return AlbumGrid([al], on_tap=lambda al=al: None)   # albums use the grid below
+
+    def _on_rows(self, rows):
+        if not self.isVisible():
+            return
+        self.clear()
+        if not backend.live:
+            self.add(Notice(backend.demo_notice or "demo data"))
         self._grid = AlbumGrid(rows, on_tap=lambda al: self._app.push(
             DetailPage(al.get("pageKind", "album"), al.get("id", ""), rtitle(al))))
         self.add(self._grid)
         self._grid.build_cells()
+        prewarm(rows, GRID_ART)
 
 
 class DetailPage(ztos.Page):

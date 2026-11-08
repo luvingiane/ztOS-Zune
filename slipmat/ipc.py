@@ -99,7 +99,7 @@ def entry_to_dict(e, art_size=300):
 
 
 class _Reader(QThread):
-    gotLine = Signal(str)
+    gotLine = Signal(object)     # parsed JSON, parsed ON THIS thread (not the GUI's)
     ended = Signal(str)
 
     def __init__(self, stream, parent=None):
@@ -115,7 +115,10 @@ class _Reader(QThread):
                 if not line:
                     self.ended.emit("the daemon closed the connection")
                     return
-                self.gotLine.emit(line.decode("utf-8", "replace"))
+                try:
+                    self.gotLine.emit(json.loads(line.decode("utf-8", "replace")))
+                except json.JSONDecodeError:
+                    pass
         except OSError as exc:
             self.ended.emit(str(exc))
 
@@ -175,14 +178,10 @@ class SlipmatClient(QObject):
         self._reader.ended.connect(self.lost)
         self._reader.start()
 
-    def _on_line(self, line):
-        line = line.strip()
-        if not line:
-            return
-        try:
-            self.eventReceived.emit(json.loads(line))
-        except json.JSONDecodeError:
-            self.lost.emit("cannot read the daemon: bad JSON line")
+    def _on_line(self, obj):
+        # already parsed on the reader thread: this slot only re-emits
+        if obj:
+            self.eventReceived.emit(obj)
 
     def send(self, obj):
         data = (json.dumps(obj) + "\n").encode("utf-8")

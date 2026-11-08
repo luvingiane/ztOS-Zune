@@ -15,7 +15,7 @@ import threading
 import urllib.request
 
 import ztos
-from PySide6.QtCore import QObject, QRectF, QThread, Signal
+from PySide6.QtCore import QObject, QRectF, Qt, QThread, Signal
 from PySide6.QtGui import QImage, QPainter
 
 from slipmat.ipc import art_url
@@ -134,9 +134,48 @@ class _Fetcher(QObject):
 
 
 _fetcher = _Fetcher()
+_listeners = {}       # template -> [cb(template, path, ok)]; ONE signal connection total
+
+
+def _dispatch(template, path, ok):
+    for cb in list(_listeners.get(template, [])):
+        try:
+            cb(template, path, ok)
+        except Exception:
+            pass
+
+
+_fetcher.done.connect(_dispatch)
+
+
+def add_listener(cb, template):
+    """Register a listener for a template; fires immediately if already cached."""
+    _listeners.setdefault(template, []).append(cb)
+    p = local_art(template, 300)
+    if p:
+        cb(template, p, True)
+
+
 _images = {}          # local path -> QImage (decoded once, shared, small cap)
 _IMAGES_MAX_BYTES = 24 * 1024 * 1024
 _images_bytes = 0
+_thumbs = {}          # (path, px) -> QImage pre-scaled to display size, shared by all rows
+
+
+def thumb_image(path: str, px: int):
+    """The artwork pre-scaled ONCE to px x px (DPR included) and shared by
+    every row showing it — paints then only copy a small pixmap."""
+    key = (path, px)
+    img = _thumbs.get(key)
+    if img is None:
+        src = image_for(path)
+        if src is None or src.isNull():
+            return None
+        img = src.scaled(px, px, Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
+        if len(_thumbs) > 256:
+            _thumbs.pop(next(iter(_thumbs)))
+        _thumbs[key] = img
+    return img
 
 
 def image_for(path: str):
@@ -174,7 +213,6 @@ class Artwork(ztos.Entry):
         self._art_size = art_size
         self._img = None
         self.setFixedSize(size, size)
-        _fetcher.done.connect(self._on_done)
         if template:
             self.set_template(template, title)
 
@@ -184,8 +222,10 @@ class Artwork(ztos.Entry):
         self._template = template or ""
         p = local_art(self._template, self._art_size) if self._template else None
         self._img = image_for(p) if p else None
-        if self._template and not self._img:
-            _fetcher.add(self._template, self._art_size)
+        if self._template:
+            add_listener(self._on_done, self._template)
+            if not self._img:
+                _fetcher.add(self._template, self._art_size)
         self.redraw()
         self.content_changed()
 

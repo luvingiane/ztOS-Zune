@@ -9,6 +9,7 @@ import ztos
 import art as art_mod
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QFontMetricsF, QLinearGradient, QPainter
+from PySide6.QtWidgets import QWidget
 
 ROW_H = 71          # 59 canvas
 TITLE_PX = 24       # 20 canvas
@@ -41,10 +42,40 @@ def fmt_ms(ms) -> str:
     return f"{s // 60}:{s % 60:02d}"
 
 
+class Thumb(QWidget):
+    """48px artwork thumb as its OWN child widget: when the image arrives it
+    redraws only itself (144px square at DPR 3) and NEVER invalidates the row's
+    text cache — that was the 98%-CPU scroll bug (each thumb arrival used to
+    force a full-DPR text re-render of the row)."""
+
+    def __init__(self, template: str, parent=None):
+        super().__init__(parent)
+        self.setFixedSize(THUMB, THUMB)
+        self.setAttribute(Qt.WA_TransparentForMouseEvents)
+        self._t = template
+        self._img = None
+        if template:
+            art_mod.add_listener(self._on_art, template)
+
+    def _on_art(self, template, path, ok):
+        if ok and template == self._t:
+            dpr = self.devicePixelRatioF() or 1.0
+            self._img = art_mod.thumb_image(path, int(THUMB * dpr))   # shared, pre-scaled once
+            self.update()
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        if self._img is not None:
+            p.drawImage(self.rect(), self._img)
+        else:
+            p.fillRect(self.rect(), QColor(38, 38, 38))   # neutral placeholder, no letters
+
+
 class Row(ztos.Entry):
-    """A list row: optional 48px artwork thumb at the left (async from the
-    disk cache, neutral grey placeholder until it arrives — never letters),
-    title, grey subtitle, duration at the right (L1/L2)."""
+    """A list row: optional 48px artwork thumb (child widget, async from the
+    disk cache, neutral grey placeholder — never letters), title, grey
+    subtitle, duration at the right (L1/L2). Fonts and elided strings are
+    cached: draw() only recomposes text when the data changes."""
 
     def __init__(self, title: str, subtitle: str = "", duration_ms: int = 0,
                  on_tap=None, on_hold=None, accent: bool = False, art: str = ""):
@@ -54,40 +85,33 @@ class Row(ztos.Entry):
         self._duration = duration_ms
         self._accent = accent
         self._art = art or ""
-        self._art_img = None
         self._tx = THUMB + 12 if self._art else 0
+        self._f_title = ztos._font(ztos.FONT_LIGHT, TITLE_PX)
+        self._f_sub = ztos._font(ztos.FONT_REGULAR, SUB_PX)
+        self._elide = {}
         if self._art:
-            p = art_mod.local_art(self._art, 300)
-            if p:
-                self._art_img = art_mod.image_for(p)
-            else:
-                art_mod._fetcher.add(self._art, 300)
-                art_mod._fetcher.done.connect(self._on_art)
+            t = Thumb(self._art, self)
+            t.move(0, (ROW_H - THUMB) // 2)
+            t.show()
 
-    def _on_art(self, template, path, ok):
-        if ok and template == self._art:
-            img = art_mod.image_for(path)
-            if img is not None and img is not self._art_img:
-                self._art_img = img
-                self.redraw()
-                self.content_changed()
+    def _elided(self, fm, text, width):
+        key = (text, round(width))
+        out = self._elide.get(key)
+        if out is None:
+            out = fm.elidedText(text, Qt.ElideRight, width)
+            self._elide[key] = out
+        return out
 
     def draw(self, p: QPainter):
         p.setRenderHints(QPainter.Antialiasing | QPainter.TextAntialiasing)
-        if self._art:
-            r = QRectF(0, (self.height() - THUMB) / 2.0, THUMB, THUMB)
-            if self._art_img is not None and not self._art_img.isNull():
-                p.drawImage(r, self._art_img)
-            else:
-                p.fillRect(r, QColor(38, 38, 38))      # neutral placeholder, no text
         p.setPen(ztos.accent() if self._accent else QColor("white"))
-        p.setFont(ztos._font(ztos.FONT_LIGHT, TITLE_PX))
+        p.setFont(self._f_title)
         fm = QFontMetricsF(p.font())
-        p.drawText(QPointF(self._tx, 30), fm.elidedText(self._title, Qt.ElideRight, self.width() - self._tx - 70))
+        p.drawText(QPointF(self._tx, 30), self._elided(fm, self._title, self.width() - self._tx - 70))
         p.setPen(QColor(255, 255, 255, 127))
-        p.setFont(ztos._font(ztos.FONT_REGULAR, SUB_PX))
+        p.setFont(self._f_sub)
         fm2 = QFontMetricsF(p.font())
-        p.drawText(QPointF(self._tx, 58), fm2.elidedText(self._subtitle, Qt.ElideRight, self.width() - self._tx - 90))
+        p.drawText(QPointF(self._tx, 58), self._elided(fm2, self._subtitle, self.width() - self._tx - 90))
         if self._duration:
             text = fmt_ms(self._duration)
             p.drawText(QPointF(self.width() - fm2.horizontalAdvance(text) - 2, 58), text)

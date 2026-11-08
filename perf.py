@@ -128,6 +128,38 @@ if _ENABLED:
         App exists (for the timer); everything is a no-op when ZUNE_PERF is off."""
         if not _ENABLED:
             return
+        # ZUNE_PROFILE=1: cProfile on board — top 40 by cumulative and by self
+        # time every 10 s, to stderr (-> app log) and to
+        # ~/.local/state/ztos/zune-profile.txt. Normal behaviour unchanged.
+        if os.environ.get("ZUNE_PROFILE"):
+            import cProfile
+            import pstats
+            import io
+            prof = cProfile.Profile()
+            prof.enable()
+            prof_path = os.path.expanduser("~/.local/state/ztos/zune-profile.txt")
+
+            def dump_profile():
+                prof.disable()
+                try:
+                    os.makedirs(os.path.dirname(prof_path), exist_ok=True)
+                    with open(prof_path, "a") as f:
+                        f.write(f"\n===== zune profile {_now() - _t0:.0f}s =====\n")
+                        for title, key in (("TOP 40 BY CUMULATIVE", "cumulative"),
+                                           ("TOP 40 BY SELF TIME", "tottime")):
+                            s = io.StringIO()
+                            pstats.Stats(prof, stream=s).sort_stats(key).print_stats(40)
+                            f.write(title + "\n" + s.getvalue() + "\n")
+                            print(f"zune-profile {title.lower()}:\n{s.getvalue()}",
+                                  file=__import__("sys").stderr, flush=True)
+                finally:
+                    prof.enable()
+
+            pt = QTimer(app.qt, interval=10000)
+            pt.timeout.connect(dump_profile)
+            pt.start()
+            print("zune-profile: ON (cProfile, dump every 10s)", file=__import__("sys").stderr,
+                  flush=True)
         from ztos import _gl as glmod
         from ztos import _native
 

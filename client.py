@@ -19,9 +19,37 @@ import subprocess
 import threading
 import time
 
-from PySide6.QtCore import QCoreApplication, QObject, QTimer, Signal
+from PySide6.QtCore import QCoreApplication, QObject, QThread, QTimer, Signal, Slot
 
 import library
+
+
+class _ParseWorker(QObject):
+    """Parses daemon payloads (entry_to_dict over hundreds of rows) OFF the GUI
+    thread; results come back as queued signals."""
+    ask_rows = Signal(str, list)
+    ask_page = Signal(str, str, object, list)
+    rows_done = Signal(str, list)
+    page_done = Signal(str, str, object, list)
+
+    def __init__(self):
+        super().__init__()
+        self._t = QThread()
+        self.moveToThread(self._t)
+        self.ask_rows.connect(self._do_rows)
+        self.ask_page.connect(self._do_page)
+        self._t.start()
+
+    @Slot(str, list)
+    def _do_rows(self, view, raw_entries):
+        from slipmat.ipc import entry_to_dict
+        self.rows_done.emit(view, [entry_to_dict(e) for e in raw_entries])
+
+    @Slot(str, str, object, list)
+    def _do_page(self, kind, id_, header, raw_entries):
+        from slipmat.ipc import entry_to_dict
+        self.page_done.emit(kind, id_, entry_to_dict(header),
+                            [entry_to_dict(e) for e in raw_entries])
 
 
 def _pump_wait(ev, timeout):
@@ -85,6 +113,9 @@ class Backend(QObject):
         self._backoff = 2.0
         self._pending_rows = {}    # view -> [(sort, reverse, cb)]
         self._pending_pages = {}   # (kind, id) -> [cb]
+        self._parser = _ParseWorker()
+        self._parser.rows_done.connect(self._rows_parsed)
+        self._parser.page_done.connect(self._page_parsed)
 
     # ---- connection / mode ---------------------------------------------------
     @property
@@ -199,39 +230,43 @@ class Backend(QObject):
         ev = self._events.setdefault(key, threading.Event())
         return _pump_wait(ev, timeout)
 
+    def _rows_parsed(self, view, rows):
+        with self._lock:
+            self._rows[view] = rows
+            pending = self._pending_rows.pop(view, [])
+        self._events.setdefault(f"rows:{view}", threading.Event()).set()
+        for _sort, _rev, cb in pending:
+            try:
+                cb(rows)
+            except Exception:
+                pass
+
+    def _page_parsed(self, kind, id_, header, entries):
+        key = (kind, id_)
+        with self._lock:
+            self._pages[key] = (header, entries)
+            pending = self._pending_pages.pop(key, [])
+        self._events.setdefault(f"page:{key}", threading.Event()).set()
+        for cb in pending:
+            try:
+                cb(header, entries)
+            except Exception:
+                pass
+
     def _on_event(self, ev):
-        from slipmat.ipc import entry_to_dict
         tag = ev.get("event", "")
         if tag == "rows":
             view = ev.get("view", "")
-            rows = [entry_to_dict(e) for e in ev.get("entries", [])]
-            with self._lock:
-                self._rows[view] = rows
-                pending = self._pending_rows.pop(view, [])
-            self._events.setdefault(f"rows:{view}", threading.Event()).set()
-            for _sort, _rev, cb in pending:
-                try:
-                    cb(rows)
-                except Exception:
-                    pass
+            self._parser.ask_rows.emit(view, ev.get("entries", []))   # parse off the GUI thread
         elif tag == "results":
+            from slipmat.ipc import entry_to_dict
             q = ev.get("query", "")
             with self._lock:
                 self._results[q] = [entry_to_dict(e) for e in ev.get("entries", [])]
             self._events.setdefault(f"results:{q}", threading.Event()).set()
         elif tag == "page":
-            key = (ev.get("kind", ""), ev.get("id", ""))
-            page = (entry_to_dict(ev.get("header", {})),
-                    [entry_to_dict(e) for e in ev.get("entries", [])])
-            with self._lock:
-                self._pages[key] = page
-                pending = self._pending_pages.pop(key, [])
-            self._events.setdefault(f"page:{key}", threading.Event()).set()
-            for cb in pending:
-                try:
-                    cb(*page)
-                except Exception:
-                    pass
+            self._parser.ask_page.emit(ev.get("kind", ""), ev.get("id", ""),
+                                   ev.get("header", {}), ev.get("entries", []))
         elif tag == "snapshot":
             prev = self.snapshot or {}
             self.snapshot = ev

@@ -428,6 +428,8 @@ class NowPlaying(ztos.Page):
         self._refresh()
 
     def _refresh(self):
+        if not self.isVisible():
+            return                      # snapshot arrives every second: skip when hidden
         t = backend.now_playing()
         t["favorite"] = self._favorite_flag(t)
         self.view.set_track(t)
