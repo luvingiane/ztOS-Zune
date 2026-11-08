@@ -55,6 +55,8 @@ if _ENABLED:
             self.identical = 0
             self.paints = 0            # QEvent.Paint on widgets
             self.changes = 0           # Page._changed
+            self.tap_paint = []        # ms from a tap (press) to the first paint after it
+            self._tap_t = None         # perf_counter of the last press
             self.raster = {}           # label -> [count, ms_total, ms_max]
             self.last_paint = None     # perf_counter of the last paintGL
             self.last_swap = None
@@ -70,6 +72,7 @@ if _ENABLED:
     _win = _Win()
     _prev_sig = None
     _live_tex = {}      # (id(layer), key) -> bytes, for the "texture vive/byte" report
+    _tap_all = []       # cumulative tap->first-paint (ms), never reset by the report
 
     def _stats(v):
         if not v:
@@ -85,8 +88,9 @@ if _ENABLED:
                           for k, v in sorted(w.raster.items()))
         tex_n = len(_live_tex)
         tex_b = sum(_live_tex.values())
+        tap = f"{len(w.tap_paint)}" + (f" avg={sum(w.tap_paint)/len(w.tap_paint):.0f} max={max(w.tap_paint):.0f}" if w.tap_paint else "")
         line = (f"zune-perf t={_now() - _t0:7.1f}s frames={w.frames} swaps={w.swaps} "
-                f"refreshes={w.refreshes} "
+                f"refreshes={w.refreshes} tap_paint(ms n/avg/max)={tap} "
                 f"d_paint(avg/min/max)={_stats(w.d_paint)} d_swap={_stats(w.d_swap)} "
                 f"draw_ms(avg/max)={w.draw_ms / max(1, w.frames):.2f}/{w.draw_max:.2f} "
                 f"quads(avg/max)={w.quads / max(1, w.frames):.1f}/{w.quads_max} identical={w.identical} "
@@ -111,6 +115,13 @@ if _ENABLED:
             finally:
                 _win.raster_add(label, (_now() - t) * 1000.0)
         _wrap(owner, name, fn)
+
+    def stats():
+        """Current window counters (for tests): dict with frames, tap_paint, ..."""
+        return {"frames": _win.frames, "swaps": _win.swaps, "paints": _win.paints,
+                "tap_paint": list(_tap_all), "changes": _win.changes,
+                "uploads": _win.uploads, "tex_live": len(_live_tex),
+                "tex_live_bytes": sum(_live_tex.values())}
 
     def install(app):
         """Hook the SDK's per-frame points. Called once from main.py, after the
@@ -216,10 +227,18 @@ if _ENABLED:
             return original(self, *args, **kwargs)
         _wrap(ztos.Page, "_changed", changed)
 
-        # --- widget repaints, seen where every event already goes past ---
+        # --- widget repaints + tap->first-paint, seen where every event goes past ---
         def event_filter(original, self, obj, event):
-            if event.type() == QEvent.Paint and isinstance(obj, QWidget):
+            kind = event.type()
+            if kind == QEvent.MouseButtonPress:
+                _win._tap_t = _now()
+            elif kind == QEvent.Paint and isinstance(obj, QWidget):
                 _win.paints += 1
+                if _win._tap_t is not None:
+                    ms = (_now() - _win._tap_t) * 1000.0
+                    _win.tap_paint.append(ms)
+                    _tap_all.append(ms)
+                    _win._tap_t = None
             return original(self, obj, event)
         _wrap(ztos._Finger, "eventFilter", event_filter)
 

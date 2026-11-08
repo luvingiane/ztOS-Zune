@@ -9,12 +9,36 @@ async load (art.py). Perf counters: ZUNE_PERF=1 (perf.py).
 No QML/Qt Quick; the SDK is used unmodified (copia in .sdk/). 360x640 points.
 """
 import os
+import sys
+import traceback
 
 import ztos
 import perf
 import hub
 import screens
 import player
+
+
+def _excepthook(exc_type, exc, tb):
+    """Every unhandled exception goes to the log WITH context (which page was
+    in front) and a short notification, instead of leaving the UI stuck."""
+    where = ""
+    try:
+        a = ztos.App.current
+        p = a.page if a is not None else None
+        if p is not None:
+            where = f" [pagina: {type(p).__name__} {getattr(p, 'title', '')!r}]"
+    except Exception:
+        pass
+    print(f"zunehd: unhandled {exc_type.__name__}: {exc}{where}\n"
+          + "".join(traceback.format_tb(tb)), file=sys.stderr, flush=True)
+    try:
+        ztos.notify("errore", f"{exc_type.__name__}: {str(exc)[:110]} — vedi log")
+    except Exception:
+        pass
+
+
+sys.excepthook = _excepthook
 
 app = ztos.App()
 perf.install(app)
@@ -29,7 +53,7 @@ if _nav:
     def _go():
         for step in _nav:
             if step in ("artists", "albums", "songs", "playlists"):
-                music.turn(["artists", "albums", "songs", "playlists"].index(step))
+                music.turn({"playlists": 0, "songs": 1, "albums": 2, "artists": 3}[step])
             elif step == "settings":
                 music.turn(4)
             elif step == "now":

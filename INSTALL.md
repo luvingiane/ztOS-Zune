@@ -80,6 +80,8 @@ env -i HOME=$HOME PATH=/usr/bin:/bin python3 tests/compare.py                # c
 env -i HOME=$HOME PATH=/usr/bin:/bin python3 tests/test_client.py             # test client vs slipmatd finto (fixture anonimizzate in tests/fixtures/)
 env -i HOME=$HOME PATH=/usr/bin:/bin QT_QPA_PLATFORM=offscreen python3 tests/test_player.py   # geometria Player (area utile 28/40) + menu Opzioni su socket finto
 env -i HOME=$HOME PATH=/usr/bin:/bin QT_QPA_PLATFORM=offscreen python3 tests/test_art.py      # fetcher artwork: download reale via HTTP locale + cache
+env -i HOME=$HOME PATH=/usr/bin:/bin QT_QPA_PLATFORM=offscreen python3 tests/test_nav.py       # navigazione completa, fallisce se il log ha eccezioni (regressione collisioni nomi SDK)
+env -i HOME=$HOME PATH=/usr/bin:/bin QT_QPA_PLATFORM=offscreen python3 tests/test_react.py     # reattività: tap -> primo paint < 150 ms (ZUNE_PERF=1)
 # screenshot Now Playing / menu Opzioni:
 ZTOS_SHOT_AFTER=6000 ZUNE_NAV=now     python3 .sdk/ztos/sdk/bin/ztos-sdk run --shot docs/shots/40-now-sdk.png
 ZTOS_SHOT_AFTER=6000 ZUNE_NAV=options python3 .sdk/ztos/sdk/bin/ztos-sdk run --shot docs/shots/41-options-sdk.png

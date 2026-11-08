@@ -124,7 +124,7 @@ class SearchPage(ztos.Page):
             else:
                 backend.play_ids([sid], 0)
         elif kind in ("album", "artist", "playlist"):
-            self._app_push(hub.DetailPage(r.get("pageKind", kind), r.get("id", "")))
+            self._app_push(hub.DetailPage(r.get("pageKind", kind), r.get("id", ""), rtitle(r)))
 
     def _app_push(self, page):
         app = ztos.App.current

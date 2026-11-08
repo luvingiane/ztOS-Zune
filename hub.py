@@ -68,18 +68,27 @@ class ListPage(ztos.Page):
         self.list.setContentsMargins(LIST_X, 0, 16, 24)
 
     def shown(self):
-        self.fill()
-
-    def fill(self):
+        # show the page at once (title/loading), fill when the data arrives:
+        # no heavy work on the tap path (reactivity budget < 150 ms)
         self.clear()
         sort, reverse = get_sort(self.view)
-        rows = backend.browse(self.view, sort, reverse)
+        if backend.live:
+            self.add(Notice("loading…"))
+        backend.browse_async(self.view, sort, reverse, cb=self._on_rows)
+
+    def _on_rows(self, rows):
+        if not self.isVisible():
+            return
+        self.clear()
         if not backend.live:
             self.add(Notice(backend.demo_notice or "demo data"))
         elif not rows:
-            self.add(Notice("loading…" if not backend.last_error else f"error: {backend.last_error}"))
+            self.add(Notice(f"error: {backend.last_error}" if backend.last_error else "empty"))
         self.build(rows)
         prewarm(rows, GRID_ART)
+
+    def fill(self):
+        self.shown()
 
     def build(self, rows):
         raise NotImplementedError
@@ -95,8 +104,9 @@ class ArtistsPage(ListPage):
     def build(self, rows):
         for a in rows:
             self.add(Row(rtitle(a), a.get("subtitle", ""),
+                         art=a.get("artworkTemplate", ""),
                          on_tap=lambda a=a: self._app.push(DetailPage(a.get("pageKind", "artist"),
-                                                                     a.get("id", "")))))
+                                                                     a.get("id", ""), rtitle(a)))))
 
 
 class SongsPage(ListPage):
@@ -105,10 +115,10 @@ class SongsPage(ListPage):
     def __init__(self, app):
         super().__init__("songs")
         self._app = app
-        self._rows = []
+        self._items = []
 
     def build(self, rows):
-        self._rows = rows
+        self._items = rows
         for i, s in enumerate(rows):
             self.add(Row(rtitle(s), s.get("subtitle", ""), s.get("durationMs", 0),
                          art=s.get("artworkTemplate", ""),
@@ -118,7 +128,7 @@ class SongsPage(ListPage):
     def _play(self, i):
         import player
         ztos.haptic("tap")
-        sent, reason = backend.play_list(self._rows, i)
+        sent, reason = backend.play_list(self._items, i)
         if not sent:
             ztos.notify("cannot play", reason or "slipmatd not ready")
             return
@@ -147,8 +157,9 @@ class PlaylistsPage(ListPage):
     def build(self, rows):
         for pl in rows:
             self.add(Row(rtitle(pl), pl.get("subtitle", ""),
+                         art=pl.get("artworkTemplate", ""),
                          on_tap=lambda pl=pl: self._app.push(DetailPage(pl.get("pageKind", "playlist"),
-                                                                        pl.get("id", "")))))
+                                                                        pl.get("id", ""), rtitle(pl)))))
 
 
 class AlbumGrid(ztos.Entry):
@@ -201,7 +212,7 @@ class AlbumsPage(ListPage):
 
     def build(self, rows):
         self._grid = AlbumGrid(rows, on_tap=lambda al: self._app.push(
-            DetailPage(al.get("pageKind", "album"), al.get("id", ""))))
+            DetailPage(al.get("pageKind", "album"), al.get("id", ""), rtitle(al))))
         self.add(self._grid)
         self._grid.build_cells()
 
@@ -212,18 +223,25 @@ class DetailPage(ztos.Page):
     + one action row (play / shuffle / queue / more) like the original's
     detail_page.rs header buttons, then the track rows with thumbs."""
 
-    def __init__(self, kind: str, id_: str):
-        super().__init__("…")
+    def __init__(self, kind: str, id_: str, title: str = "…"):
+        super().__init__(title)
         self._kind, self._id = kind, id_
+        self._title_hint = title
         self._entries = []
         self._header = {}
 
     def shown(self):
+        # page visible immediately with its title; the open() round trip is async
         self.clear()
-        header, entries = backend.open_page(self._kind, self._id)
-        if header is None:
-            self.add(Notice("loading…" if backend.live else (backend.demo_notice or "demo data")))
+        self.title = self._title_hint
+        if backend.live:
+            self.add(Notice("loading…"))
+        backend.open_page_async(self._kind, self._id, cb=self._on_page)
+
+    def _on_page(self, header, entries):
+        if not self.isVisible() or header is None:
             return
+        self.clear()
         self.title = rtitle(header)
         if not backend.live and not entries:
             self.add(Notice(backend.demo_notice or "demo data"))
@@ -304,8 +322,8 @@ class MusicHub(ztos.Pivot):
     def __init__(self, app):
         import player
         self._app = app
-        self._pages = [ArtistsPage(app), AlbumsPage(app), SongsPage(app),
-                       PlaylistsPage(app), screens.SettingsPage()]
+        self._pages = [PlaylistsPage(app), SongsPage(app), AlbumsPage(app),
+                       ArtistsPage(app), screens.SettingsPage()]
         super().__init__(self._pages)
         self.turned.connect(self._sort_label)
         self._sort_btn = ztos.RoundButton("more", "sort", self._sort_menu)

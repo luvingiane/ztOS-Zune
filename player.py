@@ -190,9 +190,9 @@ class PlayerView(ztos.Entry):
         self._cover = Artwork(300, "", "", art_size=512)
         self._cover.setParent(self)
         self._options = None
-        self._ticker = QTimer(self, interval=1000)
-        self._ticker.timeout.connect(self._tick)
-        self._ticker.start()
+        self._clock = QTimer(self, interval=1000)
+        self._clock.timeout.connect(self._tick)
+        self._clock.start()
         self._layout()
 
     def _usable(self):
@@ -347,7 +347,7 @@ class OptionsMenu(ztos.Entry):
         for row in backend.browse(view):
             if rtitle(row) == name:
                 from hub import DetailPage
-                ztos.App.current.push(DetailPage(row.get("pageKind", kind), row.get("id", "")))
+                ztos.App.current.push(DetailPage(row.get("pageKind", kind), row.get("id", ""), rtitle(row)))
                 return
 
     def draw(self, p: QPainter):

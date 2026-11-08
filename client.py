@@ -83,6 +83,8 @@ class Backend(QObject):
         self._starting = False    # one daemon-start attempt at a time
         self._reconnect_pending = False
         self._backoff = 2.0
+        self._pending_rows = {}    # view -> [(sort, reverse, cb)]
+        self._pending_pages = {}   # (kind, id) -> [cb]
 
     # ---- connection / mode ---------------------------------------------------
     @property
@@ -202,9 +204,16 @@ class Backend(QObject):
         tag = ev.get("event", "")
         if tag == "rows":
             view = ev.get("view", "")
+            rows = [entry_to_dict(e) for e in ev.get("entries", [])]
             with self._lock:
-                self._rows[view] = [entry_to_dict(e) for e in ev.get("entries", [])]
+                self._rows[view] = rows
+                pending = self._pending_rows.pop(view, [])
             self._events.setdefault(f"rows:{view}", threading.Event()).set()
+            for _sort, _rev, cb in pending:
+                try:
+                    cb(rows)
+                except Exception:
+                    pass
         elif tag == "results":
             q = ev.get("query", "")
             with self._lock:
@@ -212,10 +221,17 @@ class Backend(QObject):
             self._events.setdefault(f"results:{q}", threading.Event()).set()
         elif tag == "page":
             key = (ev.get("kind", ""), ev.get("id", ""))
+            page = (entry_to_dict(ev.get("header", {})),
+                    [entry_to_dict(e) for e in ev.get("entries", [])])
             with self._lock:
-                self._pages[key] = (entry_to_dict(ev.get("header", {})),
-                                    [entry_to_dict(e) for e in ev.get("entries", [])])
+                self._pages[key] = page
+                pending = self._pending_pages.pop(key, [])
             self._events.setdefault(f"page:{key}", threading.Event()).set()
+            for cb in pending:
+                try:
+                    cb(*page)
+                except Exception:
+                    pass
         elif tag == "snapshot":
             prev = self.snapshot or {}
             self.snapshot = ev
@@ -270,6 +286,48 @@ class Backend(QObject):
             return self._live_rows(view, sort, reverse, timeout) or []
         rows = [dict(r) for r in library.demo_library()[view]]
         return sorted(rows, key=_demo_key(view, sort), reverse=desc)
+
+    def browse_async(self, view, sort="title", reverse=False, cb=None):
+        """Like browse(), but never blocks: cb(rows) is called on the GUI thread
+        when the daemon answers (or immediately with demo data when not live).
+        Pages show their title + 'loading…' first and fill when data arrives."""
+        if cb is None or view not in VIEWS:
+            return
+        if sort not in SORTS[view]:
+            sort = SORTS[view][0]
+        desc = (sort in SORT_DESC_DEFAULT) != bool(reverse)
+        if not (self.connect() and self.live):
+            rows = [dict(r) for r in library.demo_library()[view]]
+            cb(sorted(rows, key=_demo_key(view, sort), reverse=desc))
+            return
+        if view == "songs" and sort == "added":
+            def got_albums(albums):
+                def got_songs(songs):
+                    added = {a["title"]: a["dateAdded"] for a in albums if a.get("dateAdded")}
+                    songs.sort(key=lambda s: (added.get(s.get("album", ""), ""),
+                                              (s.get("raw") or {}).get("track_number", 0)),
+                               reverse=desc)
+                    cb(songs)
+                self.browse_async("songs", "title", False, got_songs)
+            self.browse_async("albums", "added", True, got_albums)
+            return
+        key = f"rows:{view}"
+        self._events.setdefault(key, threading.Event()).clear()
+        with self._lock:
+            self._pending_rows.setdefault(view, []).append((sort, reverse, cb))
+        self._client.browse(view, limit=0, sort=sort, reverse=reverse)
+
+    def open_page_async(self, kind, id_, cb):
+        """open_page without blocking: cb(header, entries) on the GUI thread."""
+        if not (self.connect() and self.live):
+            cb(*_demo_page(kind, id_))
+            return
+        key = (kind, id_)
+        ev = f"page:{key}"
+        self._events.setdefault(ev, threading.Event()).clear()
+        with self._lock:
+            self._pending_pages.setdefault(key, []).append(cb)
+        self._client.open_page(kind, id_)
 
     def _live_rows(self, view, sort, reverse, timeout):
         key = f"rows:{view}"
