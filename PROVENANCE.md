@@ -80,7 +80,7 @@ come da regola §1).
   su PC e ricolorate `#ffffff` (unico cambiamento: il fill). Richiesto dal
   proprietario ("prendile da GTK"). Usate via `ztos.RoundButton("assets/icons/…")`
   che le renderizza a 22×22 nell'anello standard dell'SDK.
-- `icon.png`: immagine fornita **verbatim** dal proprietario (9/11 sera,
-  255x312 RGBA, logo Zune bianco) — usata così com'è come icona dell'app
-  (ztos.toml + instalata dalla shell come `hicolor/scalable/apps/$ID.png`).
-  Nessuna elaborazione lato nostro.
+- `icon.png`: `zune.png` fornita **verbatim** dal proprietario (9/11 21:06,
+  1280x1181 RGBA, logo Zune rosa/arancio su bianco, sha256 af9b0b6a…) — usata
+  così com'è come icona dell'app (ztos.toml + `hicolor/scalable/apps/$ID.png`).
+  Nessuna elaborazione lato nostro; il glyph bianco lo deriva ztmetro.
