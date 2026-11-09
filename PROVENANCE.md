@@ -80,9 +80,7 @@ come da regola §1).
   su PC e ricolorate `#ffffff` (unico cambiamento: il fill). Richiesto dal
   proprietario ("prendile da GTK"). Usate via `ztos.RoundButton("assets/icons/…")`
   che le renderizza a 22×22 nell'anello standard dell'SDK.
-- `icon-glyph.png`: sagoma **bianca su trasparente** del logo Zune (da
-  `icon.png`, alpha = distanza dal bianco del piatto, 256 px). È l'icona che
-  la shell ztOS installa come `hicolor/scalable/apps/$ID.png`: la shell deriva
-  dai glyph sempre una forma bianca, e da un PNG a colori l'estrazione esce
-  rumorosa (verificato sul telefono) — da PNG monocolore esce la forma stessa,
-  pulita. `icon.png` resta l'icona a colori della finestra (ztos.toml).
+- `icon.png`: immagine fornita **verbatim** dal proprietario (9/11 sera,
+  255x312 RGBA, logo Zune bianco) — usata così com'è come icona dell'app
+  (ztos.toml + instalata dalla shell come `hicolor/scalable/apps/$ID.png`).
+  Nessuna elaborazione lato nostro.
