@@ -16,24 +16,13 @@ from client import backend, rtitle
 from widgets import Row
 
 
-def _art_for(title: str, subtitle: str) -> str:
-    """Artwork template of a queue row: queue items carry no artwork, so look
-    the track up in the cached songs rows (by title + artist)."""
-    with backend._lock:
-        rows = backend._rows.get("songs")
-    if rows:
-        artist = subtitle.split(" — ")[0] if subtitle else ""
-        for r in rows:
-            if r.get("title") == title and (not artist or r.get("artist") == artist):
-                return r.get("artworkTemplate", "")
-    return ""
-
-
 class QueuePage(ztos.Page):
     """The queue. Rebuilt only when the CONTENT changes (signature of
     id+title), never on position-only events — a queue event storm used to
-    freeze the page. Rows: tap = jumpTo, hold = remove, long-press + drag =
-    reorder (moveInQueue, ipc.rs:236-238)."""
+    freeze the page. Rows are TEXT ONLY (the Zune queue shows no artwork:
+    74 async thumb fetches also used to keep the page's GL picture dirty
+    while they arrived). Rows: tap = jumpTo, hold = remove, long-press +
+    drag = reorder (moveInQueue, ipc.rs:236-238)."""
 
     def __init__(self):
         super().__init__("queue")
@@ -45,8 +34,27 @@ class QueuePage(ztos.Page):
         self._drag_over = None
         backend.queue_changed.connect(self._on_queue_event)
 
+    def _diag(self, tag):
+        """One line to the app log: the real geometry/GL state (read on B)."""
+        try:
+            app = ztos.App.current
+            layer = getattr(app, "gl", None) if app else None
+            rows = self._row_widgets
+            r0 = rows[0].geometry().getRect() if rows else None
+            print(f"ZUNEDIAG {tag}: win={self.window().width()}x{self.window().height()} "
+                  f"dpr={self.devicePixelRatioF():.2f} page={self.width()}x{self.height()} "
+                  f"view={self.viewport.width()}x{self.viewport.height()} "
+                  f"body={self.body.width()}x{self.body.height()} listn={self.list.count()} "
+                  f"rows={len(rows)} row0={r0} gl_on={self._gl_on} dirty={self._gl_dirty} "
+                  f"gl_top={getattr(self, '_gl_top', None)} gl_h={getattr(self, '_gl_h', None)} "
+                  f"layer={'y' if layer else 'n'} maxt={getattr(layer, 'max_texture', None) if layer else None}",
+                  flush=True)
+        except Exception as e:
+            print("ZUNEDIAG err", repr(e), flush=True)
+
     def shown(self):
         self._fill(backend.queue_items())
+        QTimer.singleShot(3000, lambda: self.isVisible() and self._diag("settled"))
 
     def _on_queue_event(self):
         if not self.isVisible():
@@ -63,6 +71,7 @@ class QueuePage(ztos.Page):
                     # big texture on every queue event (the squash/overlap on B)
                     row.redraw()
             return
+        self._diag("sig-change")
         self._fill((items, position))
 
     def _fill(self, q):
@@ -75,13 +84,13 @@ class QueuePage(ztos.Page):
             self.add(Notice(backend.demo_notice or "demo data"))
         for i, it in enumerate(items):
             r = Row(rtitle(it), it.get("subtitle", ""), it.get("duration_ms", 0),
-                    art=_art_for(it.get("title", ""), it.get("subtitle", "")),
                     accent=(i == position),
                     on_tap=lambda i=i: backend.jump_to(i),
                     on_hold=lambda i=i: self._start_drag(i))
             r.installEventFilter(self)
             self._row_widgets.append(r)
             self.add(r)
+        self._diag("filled")
 
     # ---- drag to reorder ---------------------------------------------------
     def _start_drag(self, index):
