@@ -82,3 +82,8 @@ come da regola §1).
   che le renderizza a 22×22 nell'anello standard dell'SDK.
 - `icon.svg`: wrapper SVG che embedded `icon.png` (nostro logo Zune, data-URI)
   per la shell ztOS (librsvg sul telefono non legge PNG come tile glyph).
+- `icon.svg` (aggiornato 9/11): `icon.png` convertito in sagoma **bianca su
+  trasparente** (alpha = distanza dal colore del piatto), embedded in data-URI.
+  La shell estrae dai glyph "una sola tinta" la forma stessa → logo Z pulito;
+  il PNG a colori invece cadeva sull'estrazione contorno (glitch/taglio).
+  `icon.png` resta l'icona a colori della finestra (ztos.toml).
