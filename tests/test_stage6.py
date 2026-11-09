@@ -147,6 +147,28 @@ def main():
     zapp.pop()
     pump(app, 0.8)
 
+    # ---- 4b) queue with MANY rows: _fit must grow the body (regression: the
+    # drag eventFilter used to swallow Page's LayoutRequest, so the body kept
+    # the viewport's height and Qt squashed all rows into it — the pile on B)
+    q2 = screens.QueuePage()
+    zapp.push(q2)
+    zapp.window.resize(360, 640)
+    q2.resize(360, 640)
+    pump(app, 0.6)
+    big = [{"id": f"c.big{i}", "title": f"Big Song {i}", "artist": "A", "album": "Al",
+            "duration_ms": 60000} for i in range(57)]
+    b.queue = {"items": big, "position": 0}
+    q2.shown()
+    pump(app, 1.0)
+    check("queue of 57 rows: body grew to the rows' height (LayoutRequest not swallowed)",
+          q2.body.height() >= 57 * 71 - 30 and q2._max() > 0,
+          f"body_h={q2.body.height()} view_h={q2.viewport.height()} max={q2._max()}")
+    ys = [r.y() for r in q2._row_widgets[:6]]
+    check("queue rows spaced 71px", all(ys[i + 1] - ys[i] == 71 for i in range(len(ys) - 1)),
+          str(ys))
+    zapp.pop()
+    pump(app, 0.5)
+
     # ---- 9) live tile format + 8) notify off by default ---------------------
     live = os.path.join(tmp, "ztos-live", "dev.oneplus2.zunehd")
     snap = json.load(open(os.path.join(REPO, "tests", "fixtures", "misc.json")))["snapshot"]

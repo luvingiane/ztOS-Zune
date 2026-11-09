@@ -107,7 +107,10 @@ class QueuePage(ztos.Page):
     def eventFilter(self, obj, event):
         from PySide6.QtCore import QEvent
         # NB: Qt can call eventFilter during QWidget.__init__, before our
-        # attributes exist — always getattr-guard here
+        # attributes exist — always getattr-guard here. And NEVER swallow the
+        # SDK's own events: Page.eventFilter turns the body's LayoutRequest
+        # into _fit() — without that call the body keeps the viewport's height
+        # and Qt squashes all the rows into it (the overlapping queue on B).
         if getattr(self, "_drag_from", None) is not None:
             if event.type() == QEvent.MouseMove:
                 y = obj.y() + event.position().y()
@@ -130,7 +133,8 @@ class QueuePage(ztos.Page):
                 if frm is not None and to is not None and frm != to:
                     backend.move_in_queue(frm, to)
                     self.shown()
-        return False
+                return False
+        return super().eventFilter(obj, event)
 
     def _clear(self):
         backend.clear_queue()
