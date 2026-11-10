@@ -2,12 +2,14 @@
 
 **English** · [Italiano](#italiano)
 
-<p align="center">
-  <img src="docs/shots/artist.png" width="200" alt="Artist page">
-  <img src="docs/shots/playlist.png" width="200" alt="Playlist page">
-  <img src="docs/shots/now-playing.png" width="200" alt="Now playing">
-  <img src="docs/shots/menu.png" width="200" alt="Player menu">
-</p>
+<table align="center">
+  <tr>
+    <td><img src="docs/shots/artist.png" alt="Artist page"></td>
+    <td><img src="docs/shots/playlist.png" alt="Playlist page"></td>
+    <td><img src="docs/shots/now-playing.png" alt="Now playing"></td>
+    <td><img src="docs/shots/menu.png" alt="Player menu"></td>
+  </tr>
+</table>
 <p align="center"><sub>Real screenshots, taken on a OnePlus 2 running ztOS.</sub></p>
 
 A music app for [ztOS](https://github.com/Zerone-Laboratories/ztOS) (the
