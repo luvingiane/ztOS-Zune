@@ -277,7 +277,11 @@ class NowPlaying(ztos.Page):
         t = backend.now_playing()
         fav = bool(self._track.get("favorite"))
         sid = self._song_id()
+        in_lib, lib_id = self._library_state(t)
         items = [
+            ("remove from library" if in_lib else "add to library",
+             lambda: backend.write("removeFromLibrary" if in_lib else "addToLibrary",
+                                   (lib_id or sid) if in_lib else sid)),
             ("remove from favorites" if fav else "add to favorites",
              lambda: backend.write("unfavorite" if fav else "favorite", sid)),
             (f"go to album: {t.get('album', '')}", lambda: self._go("albums", t.get("album", ""), "album")),
@@ -299,6 +303,16 @@ class NowPlaying(ztos.Page):
                 from hub import DetailPage
                 ztos.App.current.push(DetailPage(row.get("pageKind", kind), row.get("id", ""), rtitle(row)))
                 return
+
+    def _library_state(self, t):
+        """(in library?, library id) of the current track, from the cached
+        songs rows (a track not in the cached library rows is not in it)."""
+        with backend._lock:
+            rows = backend._rows.get("songs")
+        for r in rows or []:
+            if r.get("title") == t.get("title") and r.get("artist") == t.get("artist"):
+                return bool(r.get("inLibrary") or r.get("libraryId")), r.get("libraryId") or ""
+        return False, ""
 
     def _favorite_flag(self, t):
         """Favorite state of the current track, from the cached songs rows."""

@@ -114,6 +114,11 @@ def main():
           and any("artist" in l for l in labels) and any(l.startswith("shuffle") for l in labels)
           and any(l.startswith("repeat") for l in labels), str(labels))
     check("menu has NO download / share", not any("download" in l.lower() or "share" in l.lower() for l in labels))
+    check("menu has add/remove library", any("library" in l for l in labels), str(labels))
+    next(cb for l, cb in items if "library" in l)()
+    pump(app, 0.4)
+    reqs = [json.loads(l) for l in open(log)] if os.path.exists(log) else []
+    check("library action -> write req on the wire", any(r.get("req") == "write" and r.get("action") in ("addToLibrary", "removeFromLibrary") for r in reqs))
     next(cb for l, cb in items if "favorites" in l)()
     pump(app, 0.6)
     reqs = [json.loads(l) for l in open(log)] if os.path.exists(log) else []
