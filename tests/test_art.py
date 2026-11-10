@@ -82,8 +82,8 @@ def main():
     w = art.Artwork(48, "test", template, art_size=300)
     w.resize(48, 48)
     w.show()
-    check("fetcher thread started", art._fetcher._thread.isRunning() or bool(results),
-          f"running={art._fetcher._thread.isRunning()}")
+    check("fetcher thread started", any(x.isRunning() for x in art._fetcher._threads) or bool(results),
+          f"running={any(x.isRunning() for x in art._fetcher._threads)}")
     pump(app, 3.0)
 
     ok_hits = [r for r in results if r[2]]

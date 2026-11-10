@@ -37,8 +37,26 @@ def main():
         g = hero.geometry()
         if g.x() != 0 or g.width() != page.body.width() or g.width() < 300:
             fails.append(f"{kind}: hero not full-bleed x={g.x()} w={g.width()} body={page.body.width()}")
+        if kind == "libraryAlbum":
+            seen = []
+            orig = ztos.menu
+            ztos.menu = lambda anchor, items: seen.append([i[0] for i in items])
+            page._more_menu(); ztos.menu = orig
+            if not seen or "view artist" not in seen[0]:
+                fails.append(f"album more-menu lacks 'view artist': {seen}")
+            if page._artist_name() != "Fixture Artist A":
+                fails.append(f"album artist name wrong: {page._artist_name()!r}")
         zapp.pop(); pump(app, 0.5)
     srv.stop()
+    import art
+    f = art._Fetcher()
+    for th in f._threads:
+        th.isRunning = lambda: True            # no network: only the queue order is checked
+    for i in range(3):
+        f.add(f"http://x.invalid/{i}/{{w}}x{{h}}bb.jpg", 300)
+    f.add("http://x.invalid/hero/{w}x{h}bb.jpg", 768, priority=True)
+    if f._queue[0][1] != 768 or len(f._queue) != 4 or len(f._threads) < 2:
+        fails.append(f"priority/pool broken: {f._queue} threads={len(f._threads)}")
     print("ALL PASS" if not fails else "FAILED: " + "; ".join(fails))
     return 1 if fails else 0
 

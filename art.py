@@ -85,24 +85,10 @@ class _FetchThread(QThread):
     the phone (art.py:73 AttributeError), this replaces it."""
     done = Signal(str, str, bool)      # template, local path, ok
 
-    def __init__(self):
+    def __init__(self, queue, lock):
         super().__init__()
-        self._queue = []
-        self._lock = threading.Lock()
-
-    def add(self, template, size):
-        template = str(template)
-        if not template or not template.startswith("http"):
-            return
-        p = cache_path(template, size)
-        if os.path.exists(p):
-            self.done.emit(template, p, True)
-            return
-        with self._lock:
-            if (template, size) not in self._queue:
-                self._queue.append((template, size))
-        if not self.isRunning():
-            self.start()
+        self._queue = queue              # shared by all workers
+        self._lock = lock
 
     def run(self):
         while True:
@@ -132,16 +118,46 @@ class _FetchThread(QThread):
 
 
 class _Fetcher(QObject):
-    """Facade: queues downloads on the single _FetchThread and re-emits."""
+    """Facade: queues downloads on a small pool of _FetchThreads (3 in
+    parallel: one at a time was latency-bound on the phone's Wi-Fi and a
+    page's cover waited behind the 60 queued grid covers) and re-emits.
+    `priority=True` puts the request at the front of the queue."""
     done = Signal(str, str, bool)
+    WORKERS = 3
 
     def __init__(self):
         super().__init__()
-        self._thread = _FetchThread()
-        self._thread.done.connect(self.done)         # started lazily on first add
+        self._queue = []
+        self._lock = threading.Lock()
+        self._threads = [_FetchThread(self._queue, self._lock) for _ in range(self.WORKERS)]
+        for t in self._threads:
+            t.done.connect(self.done)         # started lazily on first add
 
-    def add(self, template, size):
-        self._thread.add(template, size)
+    def add(self, template, size, priority=False):
+        template = str(template)
+        if not template or not template.startswith("http"):
+            return
+        p = cache_path(template, size)
+        if os.path.exists(p):
+            self.done.emit(template, p, True)
+            return
+        with self._lock:
+            item = (template, size)
+            if item in self._queue:
+                if priority:
+                    self._queue.remove(item)
+                    self._queue.insert(0, item)
+            elif priority:
+                self._queue.insert(0, item)
+            else:
+                self._queue.append(item)
+            n = len(self._queue)
+        for t in self._threads:
+            if n <= 0:
+                break
+            if not t.isRunning():
+                t.start()
+            n -= 1
 
 
 _fetcher = _Fetcher()

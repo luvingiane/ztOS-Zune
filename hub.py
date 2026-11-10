@@ -316,7 +316,7 @@ class Hero(ztos.Entry):
             self.redraw()
         else:
             art_mod.add_listener(self._on_art, self._t)
-            art_mod._fetcher.add(self._t, self.ART)
+            art_mod._fetcher.add(self._t, self.ART, priority=True)
 
     def set_sub(self, sub: str):
         if sub and sub != self._sub:
@@ -397,6 +397,19 @@ def add_hero(page, hero: Hero):
     slot = HeroSlot(hero, page.body)
     page.add(slot)
     return hero
+
+
+def _match_artist(rows, name):
+    """The artist row of search results that is `name` (exact, else partial)."""
+    artists = [r for r in rows if r.get("kind") == "artist"]
+    key = (name or "").strip().casefold()
+    if not key:
+        return None
+    exact = next((r for r in artists if rtitle(r).strip().casefold() == key), None)
+    if exact is not None:
+        return exact
+    return next((r for r in artists if key in rtitle(r).strip().casefold()
+                 or rtitle(r).strip().casefold() in key), None)
 
 
 def _split_discography(albums):
@@ -539,12 +552,7 @@ class DetailPage(ztos.Page):
         picture + genres for the banner and the whole discography."""
         if not self.isVisible():
             return
-        artists = [r for r in rows if r.get("kind") == "artist"]
-        key = name.strip().casefold()
-        art = next((r for r in artists if rtitle(r).strip().casefold() == key), None)
-        if art is None:
-            art = next((r for r in artists if key in rtitle(r).strip().casefold()
-                        or rtitle(r).strip().casefold() in key), None)
+        art = _match_artist(rows, name)
         if art is None:
             return
         hero = getattr(self, "_hero", None)
@@ -650,14 +658,38 @@ class DetailPage(ztos.Page):
         if ids:
             backend.enqueue(ids)
 
+    def _artist_name(self):
+        h = self._header
+        for e in self._entries:
+            if e.get("artist"):
+                return e["artist"]
+        return h.get("artist") or (h.get("subtitle", "").split("\u00b7")[0].strip())
+
+    def _view_artist(self):
+        name = self._artist_name()
+        if not name:
+            ztos.notify("artist", "artist not found")
+            return
+
+        def got(rows):
+            art = _match_artist(rows, name)
+            if art is None:
+                ztos.notify("artist", f"{name}: not found")
+                return
+            ztos.App.current.push(DetailPage(art.get("pageKind", "artist"), art.get("id", ""), rtitle(art)))
+        backend.search_async(name, "artists", got)
+
     def _more_menu(self):
         in_lib = bool(self._header.get("library"))
         hid = self._header.get("id", "")
-        ztos.menu(self, [
+        items = [
             ("add to queue", self._enqueue_all),
             ("remove from library" if in_lib else "add to library",
              lambda: backend.write("removeFromLibrary" if in_lib else "addToLibrary", hid)),
-        ])
+        ]
+        if "album" in (self._kind or "").lower():
+            items.insert(0, ("view artist", self._view_artist))
+        ztos.menu(self, items)
 
 
 class MusicHub(ztos.Pivot):
