@@ -209,6 +209,8 @@ def warm_cache(widget) -> bool:
     from PySide6.QtGui import QPixmap
     if widget.width() < 2 or widget.height() < 2:
         return False
+    if widget.height() > 2 * ROW_H:
+        return False        # tall single widgets (album grid): a full-DPR pixmap would be tens of Mpx
     ratio = widget.devicePixelRatioF()
     size = widget.size() * ratio
     cache = getattr(widget, "_cache", None)
@@ -254,7 +256,7 @@ class RowWarmer:
         best, best_d = None, None
         for i in range(page.list.count()):
             wdg = page.list.itemAt(i).widget()
-            if not isinstance(wdg, ztos.Entry) or wdg.height() < 2:
+            if not isinstance(wdg, ztos.Entry) or wdg.height() < 2 or wdg.height() > 2 * ROW_H:
                 continue
             y = wdg.y()
             if y < lo or y > hi:
