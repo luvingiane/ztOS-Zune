@@ -72,7 +72,7 @@ def main():
     rows = [w for w in (d.list.itemAt(i).widget() for i in range(d.list.count())) if w is not None and w.__class__.__name__ == "Row"]
     titles = [r._title for r in rows]
     check("artist page has the hero and two album grids (albums, singles)",
-          kinds.count("ArtistHero") == 1 and kinds.count("AlbumGrid") == 2, str(kinds))
+          kinds.count("HeroSlot") == 1 and kinds.count("AlbumGrid") == 2, str(kinds))
     check("top songs = songs by this artist only (filtered), no 'Someone Else'",
           "Song 1" in titles and "Song 2" in titles and "Song 9" not in titles, str(titles))
     check("latest release row is the newest (singles included, suffix trimmed)", "Hit" in titles, str(titles))
