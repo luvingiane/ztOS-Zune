@@ -59,17 +59,38 @@ def main():
     check("filter songs: only songs, all 7", len(rows) == 7 and all(r._title.startswith("Song") for r in rows), str([r._title for r in rows]))
     page._set_filter("all")
 
-    # artist page: albums only -> album rows open pages, no play row
+    # artist page: hero + top songs (catalog search by name) + latest release +
+    # albums / singles grids; album rows open pages; song hold -> context menu
     header = {"kind": "artist", "title": "Artist 1", "subtitle": "Pop", "artworkTemplate": "", "id": "ar1"}
-    client.backend.open_page_async = lambda kind, id_, cb: QTimer.singleShot(80, lambda: cb(header, [alb(1), alb(2)]))
+    albs = [dict(alb(1), year="2019"), dict(alb(2), year="2023"), dict(alb(3), title="Hit - Single", year="2024")]
+    client.backend.open_page_async = lambda kind, id_, cb: QTimer.singleShot(80, lambda: cb(header, albs))
+    songs = [dict(song(i), artist="Artist 1 & Friend") for i in (1, 2)] + [dict(song(9), artist="Someone Else")]
+    client.backend.search_async = lambda q, f, cb: QTimer.singleShot(120, lambda: cb(songs))
     d = hub.DetailPage("artist", "ar1", "Artist 1"); zapp.push(d); d.resize(360, 640); pump(app, 1.0)
-    if d.list.count() <= 2: d.shown(); pump(app, 0.5)   # offscreen: the entrance animation may not have called shown()
+    if d.list.count() <= 2: d.shown(); pump(app, 0.8)
+    kinds = [type(d.list.itemAt(i).widget()).__name__ for i in range(d.list.count())]
     rows = [w for w in (d.list.itemAt(i).widget() for i in range(d.list.count())) if w is not None and w.__class__.__name__ == "Row"]
-    check("artist page lists the albums as rows", [r._title for r in rows] == ["Album 1", "Album 2"], str([r._title for r in rows]))
+    titles = [r._title for r in rows]
+    check("artist page has the hero and two album grids (albums, singles)",
+          kinds.count("ArtistHero") == 1 and kinds.count("AlbumGrid") == 2, str(kinds))
+    check("top songs = songs by this artist only (filtered), no 'Someone Else'",
+          "Song 1" in titles and "Song 2" in titles and "Song 9" not in titles, str(titles))
+    check("latest release row is the newest (singles included, suffix trimmed)", "Hit" in titles, str(titles))
+    if os.environ.get("SHOT"):
+        zapp.window.grab().save(os.environ["SHOT"] + "-0.png")
+        d.scroll_to(520); pump(app, 0.4)
+        zapp.window.grab().save(os.environ["SHOT"] + "-1.png")
+        d.scroll_to(0)
     pushed = []
     zapp.push = lambda p: pushed.append(p)
-    rows[0].tapped.emit()
-    check("tapping an album opens its page", pushed and isinstance(pushed[0], hub.DetailPage) and pushed[0]._kind == "album")
+    next(r for r in rows if r._title == "Hit").tapped.emit()
+    check("tapping the latest release opens its page", pushed and isinstance(pushed[0], hub.DetailPage) and pushed[0]._kind == "album")
+    menus = []
+    orig_menu = ztos.menu
+    ztos.menu = lambda anchor, items: menus.append([l for l, _ in items])
+    next(r for r in rows if r._title == "Song 1").held.emit()
+    ztos.menu = orig_menu
+    check("hold on a song row opens the context menu", menus and "add to queue" in menus[0], str(menus))
     print("ALL PASS" if not FAILS else f"FAILED: {FAILS}")
     return 1 if FAILS else 0
 

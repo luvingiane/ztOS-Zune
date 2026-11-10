@@ -57,6 +57,10 @@ def main():
             time.sleep(0.005)
 
     pump(1.0)
+    if os.environ.get("WARM"):                      # RowWarmer's effect, all rows warmed
+        t0 = time.perf_counter()
+        n_w = sum(1 for r in page.findChildren(widgets.Row) if widgets.warm_cache(r))
+        print(f"warmed {n_w} rows in {(time.perf_counter()-t0)*1000:.0f} ms (idle time, off the scroll)")
     max_scroll = page._max()
     steps = 240
     times = []

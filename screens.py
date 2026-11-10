@@ -15,7 +15,7 @@ from PySide6.QtGui import QColor, QFontMetricsF, QPainter
 from PySide6.QtWidgets import QAbstractSlider
 
 from client import backend, rtitle, unplayable_ids, is_available
-from widgets import Row, CircleButton, ROW_H
+from widgets import Row, CircleButton, RowWarmer, ROW_H
 
 
 GRIP_W = 44
@@ -97,6 +97,7 @@ class QueuePage(ztos.Page):
         self._drag_row = None
         self._drag_from = None
         self._drag_gy = 0.0
+        self._warmer = RowWarmer(self)
         self._scroll_timer = QTimer(self, interval=30)
         self._scroll_timer.timeout.connect(self._autoscroll)
         backend.queue_changed.connect(self._on_queue_event)
@@ -143,6 +144,7 @@ class QueuePage(ztos.Page):
             r._qkey = (it.get("id"), it.get("title"))
             self._row_widgets.append(r)
             self.add(r)
+        self._warmer.start()
 
     def _row_menu(self, row):
         ztos.menu(self, [("remove from queue",
@@ -337,8 +339,10 @@ class SearchPage(ztos.Page):
         kind = r.get("kind")
         art = r.get("artworkTemplate", "")
         if kind == "song":
+            from hub import song_menu
             return Row(rtitle(r), r.get("subtitle", ""), r.get("durationMs", 0), art=art,
-                       available=is_available(r), on_tap=lambda r=r: self._play_song(r))
+                       available=is_available(r), on_tap=lambda r=r: self._play_song(r),
+                       on_hold=lambda r=r: song_menu(self, r))
         return Row(rtitle(r), r.get("subtitle", ""), art=art, on_tap=lambda r=r: self._open(r))
 
     def _play_song(self, r):

@@ -148,6 +148,7 @@ class Backend(QObject):
         self._reconnect_pending = False
         self._backoff = 2.0
         self._pending_rows = {}    # view -> [(sort, reverse, cb)]
+        self._pending_results = {}
         self._pending_pages = {}   # (kind, id) -> [cb]
         self._parser = _ParseWorker()
         self._parser.rows_done.connect(self._rows_parsed)
@@ -300,6 +301,15 @@ class Backend(QObject):
             with self._lock:
                 self._results[q] = [entry_to_dict(e) for e in ev.get("entries", [])]
             self._events.setdefault(f"results:{q}", threading.Event()).set()
+            with self._lock:
+                cbs = self._pending_results.pop(q, [])
+                rows = self._results.get(q, [])
+            for cb in cbs:
+                try:
+                    cb(rows)
+                except Exception:
+                    import traceback
+                    traceback.print_exc()
         elif tag == "page":
             self._parser.ask_page.emit(ev.get("kind", ""), ev.get("id", ""),
                                    ev.get("header", {}), ev.get("entries", []))
@@ -459,6 +469,15 @@ class Backend(QObject):
                 if q in rtitle(row).lower() or q in row.get("subtitle", "").lower():
                     out.append(dict(row))
         return out
+
+    def search_async(self, query, filter_, cb):
+        """search without blocking the GUI: cb(rows) when the results arrive."""
+        if not (self.connect() and self.live and query):
+            cb(self.search(query, filter_))
+            return
+        with self._lock:
+            self._pending_results.setdefault(query, []).append(cb)
+        self._client.search(query, filter_, 0)
 
     def now_playing(self):
         s = self.snapshot or {}

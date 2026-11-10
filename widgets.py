@@ -54,6 +54,22 @@ class CircleButton(ztos.RoundButton):
     def _lean_begin(self):
         self._gl_lean = False
 
+    def set_label(self, label: str):
+        changed = self._label != label
+        super().set_label(label)
+        if changed:
+            self.redraw()                 # same stale-cache reason as set_glyph
+
+    def set_glyph(self, glyph: str):
+        # The SDK widget draws itself once into a cached picture and only
+        # copies it on repaint; RoundButton.set_glyph just calls update(), so
+        # the OLD glyph stayed on screen after a play/pause change (the button
+        # looked inverted, always one state behind). redraw() drops the cache.
+        changed = self._glyph != glyph
+        super().set_glyph(glyph)
+        if changed:
+            self.redraw()
+
 
 class Thumb(QWidget):
     """48px artwork thumb as its OWN child widget: when the image arrives it
@@ -182,3 +198,74 @@ class CenterLabel(ztos.Entry):
         p.setPen(self._color)
         p.setFont(ztos._font(self._families, self._size))
         p.drawText(QRectF(0, 0, self.width(), self.height()), Qt.AlignCenter, self._text)
+
+
+def warm_cache(widget) -> bool:
+    """Build an SDK `_Pressable`'s cached picture NOW (same code as its first
+    paintEvent) so the paint during a fling is a plain copy. On the phone the
+    first paint of a text row costs 25-30 ms at DPR 3 (sdk __init__.py:1070);
+    two new rows per frame in a fling saturated a core (the B log shows
+    pressable_paint 130-250 ms per second while scrolling)."""
+    from PySide6.QtGui import QPixmap
+    if widget.width() < 2 or widget.height() < 2:
+        return False
+    ratio = widget.devicePixelRatioF()
+    size = widget.size() * ratio
+    cache = getattr(widget, "_cache", None)
+    if cache is not None and cache.size() == size:
+        return False
+    pic = QPixmap(size)
+    pic.setDevicePixelRatio(ratio)
+    pic.fill(Qt.transparent)
+    q = QPainter(pic)
+    q.setRenderHints(QPainter.Antialiasing | QPainter.TextAntialiasing)
+    widget.draw(q)
+    q.end()
+    widget._cache = pic
+    return True
+
+
+class RowWarmer:
+    """Idle-time cache warming for the rows of a page: one row per tick, only
+    when nobody is touching or flinging the page, nearest rows to the viewport
+    first. Stops itself when everything within reach is warm."""
+
+    def __init__(self, page, interval=45):
+        from PySide6.QtCore import QTimer
+        self.page = page
+        self.timer = QTimer(page, interval=interval)
+        self.timer.timeout.connect(self._tick)
+
+    def start(self):
+        self.timer.start()
+
+    def _tick(self):
+        page = self.page
+        if not page.isVisible():
+            return
+        try:
+            if page._flinging() or ztos.App.current._finger.active:
+                return
+        except Exception:
+            pass
+        top = page._scroll if hasattr(page, "_scroll") else 0.0
+        view = max(page.viewport.height(), 400)
+        lo, hi = top - view, top + 3 * view
+        best, best_d = None, None
+        for i in range(page.list.count()):
+            wdg = page.list.itemAt(i).widget()
+            if not isinstance(wdg, ztos.Entry) or wdg.height() < 2:
+                continue
+            y = wdg.y()
+            if y < lo or y > hi:
+                continue
+            cache = getattr(wdg, "_cache", None)
+            if cache is not None and cache.size() == wdg.size() * wdg.devicePixelRatioF():
+                continue
+            d = abs(y - top)
+            if best is None or d < best_d:
+                best, best_d = wdg, d
+        if best is None:
+            self.timer.stop()
+            return
+        warm_cache(best)

@@ -37,5 +37,9 @@ plain = ztos.RoundButton(icons.path("play"), "x"); plain.setParent(host)
 QTest.mousePress(plain, Qt.LeftButton, Qt.NoModifier, QPoint(34, 26))
 if not calls:
     print("FAIL: control (plain RoundButton) did not start the lean - test is blind"); ok = False
+b._cache = object()
+b.set_glyph(icons.path("pause"))
+if b._cache is not None:
+    print("FAIL: set_glyph left the stale cached picture (button shows the old glyph)"); ok = False
 ztos.RoundButton._lean_begin = orig
 print("ALL PASS" if ok else "FAILED"); sys.exit(0 if ok else 1)

@@ -16,9 +16,29 @@ from PySide6.QtGui import QColor, QFontMetricsF, QPainter
 
 from art import Artwork, prewarm
 from client import backend, rtitle, is_available, SORTS, SORT_LABELS
-from widgets import Row, Cover, CircleButton, LIST_X, fmt_ms, ROW_H
+from widgets import Row, Cover, CircleButton, RowWarmer, LIST_X, fmt_ms, ROW_H
 
 GRID_ART = 300       # artwork size requested for grid cells (cell is 104 logical)
+
+
+def song_menu(anchor, s):
+    """The hold menu of a song row (songs list, playlist/album/artist pages,
+    search): play next, queue, favorite, library. `s` is an entry_to_dict row."""
+    sid = s.get("catalogId") or s.get("id", "")
+    if not is_available(s):
+        ztos.notify("unavailable", "this track cannot be streamed")
+    items = []
+    if is_available(s):
+        items += [("play next", lambda: backend.enqueue([sid], next_=True)),
+                  ("add to queue", lambda: backend.enqueue([sid]))]
+    if s.get("inLibrary") or s.get("libraryId"):
+        items.append(("remove from library", lambda: backend.write("removeFromLibrary", s.get("libraryId") or sid)))
+        items.append(("unfavorite" if s.get("favorite") else "favorite",
+                      lambda: backend.write("unfavorite" if s.get("favorite") else "favorite", sid)))
+    elif sid:
+        items.append(("add to library", lambda: backend.write("addToLibrary", sid)))
+    if items:
+        ztos.menu(anchor, items)
 
 
 class Notice(ztos.Entry):
@@ -73,6 +93,7 @@ class ListPage(ztos.Page):
         self._all_items = []
         self._built = 0
         self._extend_timer = None
+        self._warmer = RowWarmer(self)
 
     def shown(self):
         # show the page at once (title/loading), fill when the data arrives:
@@ -99,6 +120,7 @@ class ListPage(ztos.Page):
         self._extend_timer.timeout.connect(self._maybe_extend)
         self._extend_timer.start()
         self._build_chunk()
+        self._warmer.start()
         prewarm(rows[:60], GRID_ART)
         QTimer.singleShot(6000, self._refresh_stale)
 
@@ -129,6 +151,7 @@ class ListPage(ztos.Page):
             return
         if self._scroll + view_h * 2 > self._built * ROW_H:
             self._build_chunk()
+            self._warmer.start()
             prewarm(self._all_items[self._built:self._built + 60], GRID_ART)
 
     def make_row(self, item, index):
@@ -178,16 +201,7 @@ class SongsPage(ListPage):
         self._app.push(player.NowPlaying(self._app))
 
     def _menu(self, s):
-        sid = s.get("catalogId") or s.get("id", "")
-        items = [("play next", lambda: backend.enqueue([sid], next_=True)),
-                 ("add to queue", lambda: backend.enqueue([sid]))]
-        if s.get("inLibrary") or s.get("libraryId"):
-            items.append(("remove from library", lambda: backend.write("removeFromLibrary", s.get("libraryId") or sid)))
-            items.append(("unfavorite" if s.get("favorite") else "favorite",
-                          lambda: backend.write("unfavorite" if s.get("favorite") else "favorite", sid)))
-        else:
-            items.append(("add to library", lambda: backend.write("addToLibrary", sid)))
-        ztos.menu(self, items)
+        song_menu(self, s)
 
 
 class PlaylistsPage(ListPage):
@@ -268,6 +282,79 @@ class AlbumsPage(ListPage):
         prewarm(rows, GRID_ART)
 
 
+class ArtistHero(ztos.Entry):
+    """Top of an artist page: the artist picture cropped to fill the width,
+    darkened toward the bottom, name large over it (like the Apple Music
+    profile: picture, name, then play/shuffle). The picture arrives async."""
+
+    H = 250
+
+    def __init__(self, name: str, genres: str, template: str):
+        super().__init__("", "")
+        self._name, self._genres, self._t = name, genres, template or ""
+        self._img = None
+        self.setFixedHeight(self.H)
+        if self._t:
+            import art as art_mod
+            p = art_mod.local_art(self._t, 512)
+            if p:
+                self._img = art_mod.image_for(p)
+            else:
+                art_mod.add_listener(self._on_art, self._t)
+                art_mod._fetcher.add(self._t, 512)
+
+    def _on_art(self, template, path, ok):
+        if ok and template == self._t:
+            import art as art_mod
+            img = art_mod.image_for(path)
+            if img is not None and not img.isNull():
+                self._img = img
+                self.redraw()
+                self.content_changed()
+
+    def draw(self, p: QPainter):
+        from PySide6.QtGui import QLinearGradient
+        p.setRenderHints(QPainter.Antialiasing | QPainter.TextAntialiasing | QPainter.SmoothPixmapTransform)
+        w, h = float(self.width()), float(self.height())
+        if self._img is not None and not self._img.isNull():
+            s = max(w / self._img.width(), h / self._img.height())
+            iw, ih = self._img.width() * s, self._img.height() * s
+            p.drawImage(QRectF((w - iw) / 2, 0, iw, ih), self._img)      # top-anchored crop (faces)
+        else:
+            from widgets import draw_cover
+            draw_cover(p, QRectF(0, 0, w, h), self._name)
+        g = QLinearGradient(0, h * 0.45, 0, h)
+        g.setColorAt(0.0, QColor(0, 0, 0, 0))
+        g.setColorAt(1.0, QColor(0, 0, 0, 235))
+        p.fillRect(QRectF(0, 0, w, h), g)
+        p.setPen(QColor("white"))
+        p.setFont(ztos._font(ztos.FONT_LIGHT, 38))
+        fm = QFontMetricsF(p.font())
+        p.drawText(QPointF(0, h - 30), fm.elidedText(self._name, Qt.ElideRight, w))
+        if self._genres:
+            p.setPen(QColor(255, 255, 255, 170))
+            p.setFont(ztos._font(ztos.FONT_REGULAR, 14))
+            p.drawText(QPointF(1, h - 9), self._genres)
+
+
+def _split_discography(albums):
+    """Albums vs singles/EPs (Apple titles them "X - Single" / "X - EP"),
+    newest first; titles trimmed of that suffix for display."""
+    full, small = [], []
+    for a in albums:
+        t = rtitle(a)
+        a = dict(a)
+        for suf in (" - Single", " - EP"):
+            if t.endswith(suf):
+                a["title"] = t[: -len(suf)]
+                small.append(a)
+                break
+        else:
+            full.append(a)
+    key = lambda a: str(a.get("year") or "")
+    return sorted(full, key=key, reverse=True), sorted(small, key=key, reverse=True)
+
+
 class DetailPage(ztos.Page):
     """Album / artist / playlist page, metro style: compact header (real cover
     140px left, name in light type, artist/curator, track count + total time)
@@ -298,6 +385,9 @@ class DetailPage(ztos.Page):
             self.add(Notice(backend.demo_notice or "demo data"))
         self._entries = entries
         self._header = header
+        if "artist" in (self._kind or "").lower():
+            self._artist_page(header, entries)
+            return
         if "playlist" in (self._kind or "") and not header.get("artworkTemplate") and entries:
             import art as _art
             paths = [_art.local_art(e.get("artworkTemplate", ""), 300) for e in entries[:4]]
@@ -327,8 +417,108 @@ class DetailPage(ztos.Page):
             self.add(Row(rtitle(e), e.get("subtitle", ""), e.get("durationMs", 0),
                          art=e.get("artworkTemplate", ""), accent=cur,
                          available=is_available(e),
-                         on_tap=lambda i=i: self._play_from(i)))
+                         on_tap=lambda i=i: self._play_from(i),
+                         on_hold=lambda e=e: song_menu(self, e)))
         prewarm([header] + entries, GRID_ART)
+
+    # ---- artist profile ---------------------------------------------------------
+    def _artist_page(self, header, entries):
+        """Artist profile built from what the daemon can give: the artist
+        picture + name, play/shuffle over the TOP SONGS (catalog search by the
+        artist's name: Apple ranks by popularity), the latest release, the
+        albums and the singles/EPs. For a library artist the full catalog
+        discography is fetched too. (The daemon has no videos, playlists,
+        radio or similar-artists endpoints.)"""
+        name = rtitle(header)
+        self.header.setVisible(False)            # the hero carries the name
+        self._entries = []                       # top songs, filled async
+        self._alb_widgets = []
+        self.add(ArtistHero(name, header.get("subtitle", "") or header.get("genres", ""),
+                            header.get("artworkTemplate", "")))
+        self.space(6)
+        self.round_buttons(
+            CircleButton(icons.path("play"), on_tap=self._play_all),
+            CircleButton(icons.path("shuffle"), on_tap=self._play_shuffled),
+            CircleButton(icons.path("queue"), on_tap=self._enqueue_all),
+            CircleButton(icons.path("more"), on_tap=self._more_menu))
+        self.space(4)
+        self._latest_slot = self.list.count() - 1
+        self.section("top songs")
+        self._top_note = Notice("loading…" if backend.live else "")
+        self.add(self._top_note)
+        self._albums_slot = self.list.count() - 1
+        self._show_albums([e for e in entries if e.get("kind") == "album"])
+        backend.search_async(name, "songs", lambda rows, n=name: self._on_top_songs(n, rows))
+        if "library" in (self._kind or "").lower() and backend.live:
+            # library artist: only the library's albums came back; get the catalog artist
+            backend.search_async(name, "artists", lambda rows, n=name: self._on_catalog_artist(n, rows))
+
+    def _on_top_songs(self, name, rows):
+        if not self.isVisible() or getattr(self, "_top_note", None) is None:
+            return
+        low = name.lower()
+        songs = [r for r in rows if r.get("kind") == "song" and low in (r.get("artist", "") or "").lower()][:5]
+        idx = self.list.indexOf(self._top_note)
+        self.list.takeAt(idx).widget().deleteLater()
+        self._top_note = None
+        self._entries = songs
+        if not songs:
+            self.list.insertWidget(idx, Notice("no popular songs found"))
+            return
+        for i, e in enumerate(songs):
+            row = Row(rtitle(e), e.get("subtitle", ""), e.get("durationMs", 0),
+                      art=e.get("artworkTemplate", ""), available=is_available(e),
+                      on_tap=lambda i=i: self._play_from(i), on_hold=lambda e=e: song_menu(self, e))
+            self.list.insertWidget(idx + i, row)
+        prewarm(songs, GRID_ART)
+
+    def _on_catalog_artist(self, name, rows):
+        art = next((r for r in rows if r.get("kind") == "artist" and rtitle(r).lower() == name.lower()), None)
+        if art is not None:
+            backend.open_page_async(art.get("pageKind", "artist"), art.get("id", ""),
+                                    lambda hdr, ents: self._on_catalog_albums(ents))
+
+    def _on_catalog_albums(self, entries):
+        if self.isVisible():
+            self._show_albums([e for e in entries if e.get("kind") == "album"])
+
+    def _show_albums(self, albums):
+        """(Re)build latest release + albums + singles/EPs at their slot."""
+        for w in getattr(self, "_alb_widgets", []):
+            self.list.removeWidget(w)
+            w.deleteLater()
+        self._alb_widgets = []
+        if not albums:
+            return
+        full, small = _split_discography(albums)
+        newest = max(albums, key=lambda a: str(a.get("year") or ""))
+        pos = [self._albums_slot]
+
+        def put(w):
+            self.list.insertWidget(pos[0], w)
+            pos[0] += 1
+            self._alb_widgets.append(w)
+
+        def label(text):
+            from PySide6.QtWidgets import QLabel
+            lab = QLabel(text)
+            lab.setFont(ztos._font(ztos.FONT_REGULAR, 13))
+            lab.setStyleSheet("color: rgba(255,255,255,0.6); padding-top: 14px; padding-bottom: 4px;")
+            put(lab)
+
+        def open_album(al):
+            ztos.App.current.push(DetailPage(al.get("pageKind", "album"), al.get("id", ""), rtitle(al)))
+
+        label("latest release")
+        put(Row(rtitle(newest).replace(" - Single", "").replace(" - EP", ""), newest.get("subtitle", ""),
+                art=newest.get("artworkTemplate", ""), on_tap=lambda: open_album(newest)))
+        for text, group in (("albums", full), ("singles & EPs", small)):
+            if group:
+                label(text)
+                grid = AlbumGrid(group, on_tap=open_album)
+                put(grid)
+                grid.build_cells()
+        prewarm(albums, GRID_ART)
 
     def _play_from(self, i):
         """Tap a track row: play from that row, the rest of the list in queue

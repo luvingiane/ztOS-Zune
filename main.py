@@ -84,4 +84,24 @@ _pm = os.environ.get("ZUNE_PERFMODE")
 if _pm in ("big", "eco", "normal"):
     print(f"zunehd: ztos.performance({_pm!r}) -> {ztos.performance(_pm)}", flush=True)
 
+# Present-path experiment (PERF-ON-B.md §7): ZUNE_SWAP0=1 makes the GL layer's
+# swap non-blocking (swapInterval 0). With interval 1 every frame waits for the
+# compositor's frame callback AFTER the layer swap and then the host commit
+# waits for another one (sdk _gl.py `_next`): two serial waits = ~33 ms/frame.
+# Off by default; the log says what happened.
+if os.environ.get("ZUNE_SWAP0"):
+    try:
+        from ztos import _gl as _glmod
+        _orig_surface_init = _glmod._Surface.__init__
+
+        def _surface_init(self, layer):
+            _orig_surface_init(self, layer)
+            fmt = self.format()
+            fmt.setSwapInterval(0)
+            self.setFormat(fmt)
+        _glmod._Surface.__init__ = _surface_init
+        print("zunehd: GL layer swapInterval=0 (ZUNE_SWAP0)", flush=True)
+    except Exception as _e:
+        print("zunehd: ZUNE_SWAP0 failed:", _e, flush=True)
+
 app.run(music)

@@ -135,3 +135,12 @@ draw+finish ~40 ms/frame = costo per frame, non attesa DSI). Esperimento:
   `cat /sys/devices/system/cpu/cpu*/cpufreq/scaling_cur_freq`.
 - Lettura: d_swap ≈ 33 ms con draw ≈ 1 ms ⇒ attesa di presentazione; thread
   python3 > 90 % o draw_ms alto ⇒ CPU-bound (cambia con `big`?).
+
+
+## 7. Esperimento swap0 (stage 9b)
+
+Voce di menu "Zune HD (swap0 test)" = `ZUNE_PERF=1 ZUNE_SWAP0=1`. Stesso scenario
+(scroll songs 15 s, push pagina) della voce normale: confronta `swaps` al secondo e
+`d_swap`. Se passa da ~30 a ~60 fps con draw_ms invariato, l'ipotesi (due attese
+seriali per frame) è confermata e si rende permanente; se non cambia o c'è
+flicker/tearing, si scarta. Rimuovere la voce a fine prova (rinomina `.disabled-…`).
