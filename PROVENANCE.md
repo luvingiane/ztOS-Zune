@@ -11,6 +11,12 @@
   scritta una licenza (citandone il testo), **non si legge, non si copia e non
   si adatta il suo codice** (né TS, né CSS, né HTML, né asset).
 
+> **Branch pubblico `ztOS-Zune`:** gli screenshot della demo (`docs/shots/0x-*`,
+> `*-ref-*`), `docs/compare/` e `tests/compare.py` NON sono pubblicati: restano
+> solo nella storia locale del branch `master`. I riferimenti a quei file nei
+> documenti di lavoro (`DESIGN.md`, `ACCEPTANCE.md`, `INSTALL.md`, `STATO.md`)
+> sono quindi storici. L'app non contiene più alcun dato demo.
+
 ## 2. Cosa è stato osservato (e quando)
 
 Permesso dal prompt: **guardare la demo in esecuzione** (screenshot,
@@ -42,7 +48,7 @@ Zune HD, e resta qui anche se la licenza non arrivasse mai.
   `bransonwerner/zune-player` (nessun TS/CSS/HTML/asset), né via browser né
   via git. Non sono stati aperti i suoi asset di rete oltre alla pagina demo
   stessa. Nessun messaggio all'autore.
-- Nessun font, immagine o marchio Microsoft è presente in questo repo.
+- Nessun font, immagine o codice Microsoft è presente in questo repo (l'icona `icon.png` è il logo Zune, marchio Microsoft, tenuta consapevolmente dal proprietario: prodotto fuori commercio).
   Font: si usano i font di sistema di ztOS (stack "Segoe UI"/"Selawik"/
   "Open Sans"/sans-serif come nel wrapper ztOS, cadendo su DejaVu Sans su PC).
   Icone: SVG scritte da zero in `assets/icons/` (licenza propria, GPL-3.0-or-later).

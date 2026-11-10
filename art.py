@@ -75,7 +75,7 @@ def set_covers(on: bool):
 
 
 def noimg() -> bool:
-    """No artwork at all: env ZUNE_NOIMG=1 or Settings "Copertine" off."""
+    """No artwork at all: env ZUNE_NOIMG=1 or Settings "Covers in lists" off."""
     global _covers
     if NOIMG:
         return True

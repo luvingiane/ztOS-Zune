@@ -2,8 +2,8 @@
 
 Opens directly on the music hub (ztos.Pivot: artists/albums/songs/playlists/
 settings — the home hub of stage 1/2 is gone, see STATO.md). Back from the hub
-closes the app. Data: slipmatd when its stage is ready (client.backend), demo
-data otherwise with a visible notice. Artwork: template -> disk cache ->
+closes the app. Data: slipmatd when its stage is ready (client.backend), an empty
+state otherwise with a visible notice. Artwork: template -> disk cache ->
 async load (art.py). Perf counters: ZUNE_PERF=1 (perf.py).
 
 No QML/Qt Quick; the SDK is used unmodified (copia in .sdk/). 360x640 points.
@@ -27,13 +27,13 @@ def _excepthook(exc_type, exc, tb):
         a = ztos.App.current
         p = a.page if a is not None else None
         if p is not None:
-            where = f" [pagina: {type(p).__name__} {getattr(p, 'title', '')!r}]"
+            where = f" [page: {type(p).__name__} {getattr(p, 'title', '')!r}]"
     except Exception:
         pass
     print(f"zunehd: unhandled {exc_type.__name__}: {exc}{where}\n"
           + "".join(traceback.format_tb(tb)), file=sys.stderr, flush=True)
     try:
-        ztos.notify("errore", f"{exc_type.__name__}: {str(exc)[:110]} — vedi log")
+        ztos.notify("error", f"{exc_type.__name__}: {str(exc)[:110]} — see log")
     except Exception:
         pass
 

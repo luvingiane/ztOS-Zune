@@ -3,8 +3,8 @@ the anonymized fixtures in tests/fixtures/ — the real samples in
 ~/oneplus2/docs/zune-real-samples.txt are NEVER copied here.
 
 Covers the stage-3 fixes: correct per-view mapping (artist name not genres,
-album name not title-less squares), live-only data when stage=ready, demo only
-when the daemon is missing, sort params on the wire, songs+"added" joined
+album name not title-less squares), live-only data when stage=ready, an empty
+state when the daemon is missing, sort params on the wire, songs+"added" joined
 through the albums' date_added, search results, open page, snapshot/queue.
 
 Run:  env -i HOME=$HOME PATH=/usr/bin:/bin python3 tests/test_client.py
@@ -159,25 +159,23 @@ def main():
     except Exception:
         pass
 
-    # --- daemon missing: demo data, with a notice -----------------------------
+    # --- daemon missing: empty state, with a notice ------------------
     os.unlink(sock)
     b2 = client.Backend()
     check("no socket -> not live", not b2.connect() and not b2.live)
-    check("demo notice shown", "demo" in b2.demo_notice, b2.demo_notice)
-    rows = b2.browse("artists")
-    check("demo fallback rows", len(rows) == 4 and rows[0].get("name") == "Afterglow")
+    check("offline notice shown", b2.status_notice.startswith("slipmatd"), b2.status_notice)
+    check("no daemon -> no rows (no sample data)", b2.browse("artists") == [] and b2.search("a") == []
+          and b2.queue_items() == ([], 0) and not b2.now_playing()["title"])
 
-    # --- daemon present but signedOut: demo with notice, never mixed ---------
+    # --- daemon present but signedOut: empty with notice, never mixed ---------
     srv2 = FakeSlipmatd(sock, stage="signedOut")
     srv2.start()
     b3 = client.Backend()
     b3.connect(ready_timeout=3.0)
     pump(app, 0.3)
     check("signedOut -> not live", not b3.live, f"stage={b3.stage}")
-    check("signedOut notice", "signedOut" in b3.demo_notice, b3.demo_notice)
-    rows3 = b3.browse("songs")
-    check("signedOut -> demo rows, not daemon rows", all("Fixture" not in (r.get("title") or "") for r in rows3)
-          and len(rows3) > 0)
+    check("signedOut notice", "signedOut" in b3.status_notice, b3.status_notice)
+    check("signedOut -> no rows at all", b3.browse("songs") == [])
     srv2.stop()
     try:
         b3._client.close()

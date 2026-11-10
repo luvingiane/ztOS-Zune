@@ -31,10 +31,10 @@ def main():
     page = ztos.Page("bench", header=False)
     page.list.setContentsMargins(17, 0, 16, 24)
     songs = []
-    lib = library.demo_library()["songs"]
     for i in range(n):
-        s = lib[i % len(lib)]
-        songs.append(dict(s, title=f"{s['title']} {i}", id=f"bench-{i}"))
+        songs.append({"kind": "song", "title": f"Song {i}", "subtitle": "Artist — Album",
+                      "artist": "Artist", "album": "Album", "duration_ms": 180000,
+                      "id": f"bench-{i}", "catalogId": f"c{i}"})
     # one artwork template shared by all rows, pre-seeded in the disk cache:
     # during scroll we "deliver" it progressively, like the fetcher would
     import art

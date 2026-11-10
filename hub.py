@@ -3,7 +3,7 @@ settings (the app opens directly here — stage 3 navigation, see STATO.md).
 
 All rows come from client.backend: slipmatd rows (entry_to_dict: "title" is
 the main text, "subtitle" the secondary, "artworkTemplate" the cover) when the
-daemon is ready, demo data otherwise with a visible notice row. Each view has
+daemon is ready, an empty state otherwise with a visible notice row. Each view has
 its own sort (SortBy::for_view, slipmat-core/src/sort.rs), chosen from the
 app bar's sort button, direction included, remembered between sessions.
 """
@@ -43,7 +43,7 @@ def song_menu(anchor, s):
 
 
 class Notice(ztos.Entry):
-    """A grey status line at the top of a list (demo mode, loading, errors)."""
+    """A grey status line at the top of a list (offline, loading, errors)."""
 
     def __init__(self, text: str):
         super().__init__("", "")
@@ -110,7 +110,7 @@ class ListPage(ztos.Page):
             return
         self.clear()
         if not backend.live:
-            self.add(Notice(backend.demo_notice or "demo data"))
+            self.add(Notice(backend.status_notice or "offline"))
         elif not rows:
             self.add(Notice(f"error: {backend.last_error}" if backend.last_error else "empty"))
         if self.view == "playlists":              # exempt from ZUNE_NOIMG
@@ -264,7 +264,7 @@ class AlbumGrid(ztos.Entry):
 
 
 def albums_as_list() -> bool:
-    """Albums as rows instead of the cover grid: Settings "Album in lista",
+    """Albums as rows instead of the cover grid: Settings "Albums as a list",
     or forced when covers are off (a grid of grey squares is useless)."""
     import art as _a
     try:
@@ -301,7 +301,7 @@ class AlbumsPage(ListPage):
             return
         self.clear()
         if not backend.live:
-            self.add(Notice(backend.demo_notice or "demo data"))
+            self.add(Notice(backend.status_notice or "offline"))
         self._grid = AlbumGrid(rows, on_tap=self._open)
         self.add(self._grid)
         self._grid.build_cells()
@@ -484,7 +484,7 @@ class DetailPage(ztos.Page):
         self.clear()
         self.title = rtitle(header)
         if not backend.live and not entries:
-            self.add(Notice(backend.demo_notice or "demo data"))
+            self.add(Notice(backend.status_notice or "offline"))
         self._entries = entries
         self._header = header
         if "artist" in (self._kind or "").lower():

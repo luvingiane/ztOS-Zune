@@ -1,12 +1,12 @@
-"""Backend of the app: slipmatd when it is ready, demo data otherwise.
+"""Backend of the app: slipmatd when it is ready, an empty state otherwise.
 
 Wraps slipmat/ipc.py (the wire client): one subscribed connection; `browse`
 answers arrive as `rows` events, `search` as `results`, `open` as `page`, plus
 pushed `snapshot`/`queue`/`stage`/`libraryChanged`/`error` events.
 
 Mode rule (owner, 7/11): with stage == "ready" ONLY the daemon's data is
-used; the demo data is shown only when the daemon is missing or its stage is
-signedOut/broken, and then with a visible notice (see `demo_notice`).
+used; when the daemon is missing or its stage is signedOut/broken the pages
+are empty with a visible notice (see `status_notice`). There is no sample data.
 
 Sort: the daemon sorts (`browse` sort/reverse, SortBy in
 slipmat-core/src/sort.rs) for every view; songs have no "added" (Apple sends
@@ -56,7 +56,7 @@ def _pump_wait(ev, timeout):
     """Wait on a threading.Event while keeping Qt's event loop running: the
     daemon's answers arrive as queued signals on THIS thread, so a plain
     ev.wait() would deadlock the loop and time out (that is why live rows
-    used to fall back to demo on the phone)."""
+    used to time out on the phone)."""
     app = QCoreApplication.instance()
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
@@ -68,8 +68,8 @@ def _pump_wait(ev, timeout):
 
 
 def rtitle(r) -> str:
-    """Main text of a row: entry_to_dict flattens to "title", the demo data
-    keeps "name" for artists/albums/playlists."""
+    """Main text of a row: entry_to_dict flattens to "title", some
+    rows keep "name" for artists/albums/playlists."""
     return r.get("title") or r.get("name") or ""
 
 VIEWS = ("artists", "albums", "songs", "playlists")
@@ -105,7 +105,7 @@ def is_available(row) -> bool:
         return True
     cid = row.get("catalogId") or row.get("catalog_id") or ""
     if not cid:
-        # demo rows have no catalog ids at all: treat only live rows as unavailable
+        # rows without the daemon's raw payload (never from the daemon) are not judged
         return not row.get("raw")
     return cid not in unplayable_ids()
 
@@ -161,11 +161,12 @@ class Backend(QObject):
         return self._client is not None and self.stage == "ready"
 
     @property
-    def demo_notice(self):
+    def status_notice(self):
+        """Why there is nothing to show (empty when the daemon is ready)."""
         if self._client is None:
-            return "demo data — slipmatd not running"
+            return "slipmatd not running"
         if self.stage and self.stage != "ready":
-            return f"demo data — slipmatd stage: {self.stage}"
+            return f"slipmatd stage: {self.stage}"
         return ""
 
     # ---- daemon lifecycle: socket -> systemctl --user -> /usr/bin/slipmatd --
@@ -365,8 +366,7 @@ class Backend(QObject):
         """Rows of a collection view, sorted. Live: the daemon sorts — except
         songs+"added", which Apple's data does not have (no dateAdded on
         library songs), so those are joined client-side through the albums'
-        date_added. When live, a timeout returns [] (NEVER demo data); demo is
-        sorted here so the sort control works the same without the daemon.
+        date_added. When live, a timeout returns []; without the daemon it is [] too.
 
         `reverse` flips the natural direction (dates are newest-first by
         default — SortBy::descends_by_default, sort.rs)."""
@@ -385,12 +385,11 @@ class Backend(QObject):
                           reverse=desc)
                 return rows
             return self._live_rows(view, sort, reverse, timeout) or []
-        rows = [dict(r) for r in library.demo_library()[view]]
-        return sorted(rows, key=_demo_key(view, sort), reverse=desc)
+        return []
 
     def browse_async(self, view, sort="title", reverse=False, cb=None):
         """Like browse(), but never blocks: cb(rows) is called on the GUI thread
-        when the daemon answers (or immediately with demo data when not live).
+        when the daemon answers (or immediately with [] when not live).
         Pages show their title + 'loading…' first and fill when data arrives."""
         if cb is None or view not in VIEWS:
             return
@@ -398,8 +397,7 @@ class Backend(QObject):
             sort = SORTS[view][0]
         desc = (sort in SORT_DESC_DEFAULT) != bool(reverse)
         if not (self.connect() and self.live):
-            rows = [dict(r) for r in library.demo_library()[view]]
-            cb(sorted(rows, key=_demo_key(view, sort), reverse=desc))
+            cb([])
             return
         if view == "songs" and sort == "added":
             def got_albums(albums):
@@ -421,7 +419,7 @@ class Backend(QObject):
     def open_page_async(self, kind, id_, cb):
         """open_page without blocking: cb(header, entries) on the GUI thread."""
         if not (self.connect() and self.live):
-            cb(*_demo_page(kind, id_))
+            cb({}, [])
             return
         key = (kind, id_)
         ev = f"page:{key}"
@@ -440,7 +438,7 @@ class Backend(QObject):
 
     def open_page(self, kind, id_, timeout=8.0):
         """(header, entries) of an album/artist/playlist page (`open` req).
-        Live timeout -> (None, []) — never demo data while live."""
+        Live timeout -> (None, [])."""
         if self.connect() and self.live:
             key = (kind, id_)
             ev = f"page:{key}"
@@ -450,10 +448,10 @@ class Backend(QObject):
             with self._lock:
                 page = self._pages.get(key)
             return page if page is not None else (None, [])
-        return _demo_page(kind, id_)
+        return {}, []
 
     def search(self, query, filter_="all", offset=0, timeout=8.0):
-        """Catalog+library search. Live timeout -> [] (never demo while live)."""
+        """Catalog+library search. Live timeout -> []."""
         if self.connect() and self.live and query:
             key = f"results:{query}"
             self._events.setdefault(key, threading.Event()).clear()
@@ -462,13 +460,7 @@ class Backend(QObject):
             with self._lock:
                 rows = self._results.get(query)
             return rows if rows is not None else []
-        q = query.lower()
-        out = []
-        for view in VIEWS:
-            for row in library.demo_library()[view]:
-                if q in rtitle(row).lower() or q in row.get("subtitle", "").lower():
-                    out.append(dict(row))
-        return out
+        return []
 
     def search_async(self, query, filter_, cb):
         """search without blocking the GUI: cb(rows) when the results arrive."""
@@ -487,13 +479,9 @@ class Backend(QObject):
                     "position_ms": s.get("position_ms", 0), "playing": bool(s.get("playing")),
                     "art_path": s.get("art_path", ""), "volume": s.get("volume", 1.0),
                     "shuffle": bool(s.get("shuffle", False)), "repeat": s.get("repeat", "none")}
-        d = dict(library.NOW_PLAYING)
-        d["playing"] = True
-        d["art_path"] = ""
-        d["volume"] = 1.0
-        d["shuffle"] = False
-        d["repeat"] = "none"
-        return d
+        return {"title": "", "artist": "", "album": "", "duration_ms": 0,
+                "position_ms": 0, "playing": False, "art_path": "", "volume": 1.0,
+                "shuffle": False, "repeat": "none"}
 
     def queue_items(self):
         if self.live and self.queue:
@@ -502,8 +490,7 @@ class Backend(QObject):
                       "duration_ms": it.get("duration_ms", 0)}
                      for it in self.queue.get("items", [])]
             return items, self.queue.get("position", 0)
-        demo = library.demo_library()["songs"]
-        return [dict(s) for s in demo[:6]], 0
+        return [], 0
 
     # ---- writes --------------------------------------------------------------
     def _send(self, fn, *a, **k):
@@ -588,37 +575,3 @@ class Backend(QObject):
 
 
 backend = Backend()
-
-
-def _demo_key(view, sort):
-    def key(r):
-        if sort == "title":
-            return rtitle(r).lower()
-        if sort == "artist":
-            return (r.get("artist") or rtitle(r)).lower()
-        if sort == "album":
-            return (r.get("album") or "").lower()
-        if sort in ("year", "added", "updated"):
-            return r.get("date_added") or r.get("year") or ""
-        return ""
-    return key
-
-
-def _demo_page(kind, id_):
-    lib = library.demo_library()
-    if kind.endswith("Album") or kind == "album":
-        for al in lib["albums"]:
-            if al["id"] == id_:
-                tracks = [s for s in lib["songs"] if s["album"] == al["name"]]
-                return al, tracks
-    if kind.endswith("Artist") or kind == "artist":
-        for a in lib["artists"]:
-            if a["id"] == id_:
-                albums = [al for al in lib["albums"] if al["artist"] == a["name"]]
-                return a, albums
-    if kind.endswith("Playlist") or kind == "playlist":
-        for p in lib["playlists"]:
-            if p["id"] == id_:
-                return p, [dict(t, subtitle=f"{t.get('artist', '')} — {t.get('album', '')}")
-                           for t in p.get("tracks", [])]
-    return {}, []

@@ -1,6 +1,6 @@
 """Shared drawing pieces for the pages: list rows and gradient covers.
 
-List rows follow the demo's songs list (ACCEPTANCE L1/L2): 299x59 canvas ->
+List rows follow the reference songs list (ACCEPTANCE L1/L2): 299x59 canvas ->
 360x71 logical, title 20px canvas -> 24px light at x+14 -> 17, subtitle 13px
 canvas -> 15px grey rgba(255,255,255,0.5), duration at the right. Covers are
 plain gradients, never placeholder text (A2/N1).

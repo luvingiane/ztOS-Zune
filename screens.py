@@ -129,7 +129,7 @@ class QueuePage(ztos.Page):
         self._sig = tuple((i.get("id"), i.get("title")) for i in items)
         if not backend.live:
             from hub import Notice
-            self.add(Notice(backend.demo_notice or "demo data"))
+            self.add(Notice(backend.status_notice or "offline"))
         unplay = unplayable_ids()
         for i, it in enumerate(items):
             r = QueueRow(rtitle(it), it.get("subtitle", ""), it.get("duration_ms", 0),
@@ -323,7 +323,7 @@ class SearchPage(ztos.Page):
         self._clear_results()
         if q and not results:
             from hub import Notice
-            self.add(Notice("no results" if backend.live else (backend.demo_notice or "demo data")))
+            self.add(Notice("no results" if backend.live else (backend.status_notice or "offline")))
         self._songs = [r for r in results if r.get("kind") == "song"]
         for kind, header, rows in group_results(results):
             cap = dict((k, c) for k, _h, c in SECTIONS)[kind]
@@ -374,14 +374,14 @@ class SettingsPage(ztos.Page):
         self.space(8)
         self._stage_row = self.entry("daemon", "…", on_hold=None)
         st = ztos.store("zunehd")
-        self.toggle("Notifiche cambio brano", on=bool(st.get("notify_track", False)),
+        self.toggle("Track-change notifications", on=bool(st.get("notify_track", False)),
                     on_change=lambda on: (st.__setitem__("notify_track", on), st.save()))
-        self.toggle("Sfondo sfocato nel player", on=bool(st.get("blur_bg", True)),
+        self.toggle("Blurred background in the player", on=bool(st.get("blur_bg", True)),
                     on_change=lambda on: (st.__setitem__("blur_bg", on), st.save()))
         import art as art_mod
-        self.toggle("Copertine nelle liste", on=bool(st.get("covers", True)),
+        self.toggle("Covers in lists", on=bool(st.get("covers", True)),
                     on_change=lambda on: (st.__setitem__("covers", on), st.save(), art_mod.set_covers(on)))
-        self.toggle("Album in lista (senza griglia)", on=bool(st.get("albums_list", False)),
+        self.toggle("Albums as a list (no grid)", on=bool(st.get("albums_list", False)),
                     on_change=lambda on: (st.__setitem__("albums_list", on), st.save()))
         self.entry("about", "", self._about)
         backend.stage_changed.connect(lambda _s: self._refresh_stage())
@@ -394,13 +394,13 @@ class SettingsPage(ztos.Page):
     def _refresh_stage(self):
         if self._stage_row is None:
             return
-        mode = "live" if backend.live else "demo"
+        mode = "live" if backend.live else "offline"
         stage = backend.stage or ("not running" if backend._client is None else "…")
         self._stage_row.set_detail(f"{mode} — stage: {stage}")
 
     def _about(self):
         accent = ztos.accent()
-        backend_name = "slipmatd (live)" if backend.live else (backend.demo_notice or "demo data")
+        backend_name = "slipmatd (live)" if backend.live else (backend.status_notice or "offline")
         ztos.message("about", f"{ztos.manifest().get('name')} v{ztos.manifest().get('version')}\n"
                               f"accent {accent.name()} from ztSettings\nbackend: {backend_name}",
                      ["ok"], lambda _c: None)
