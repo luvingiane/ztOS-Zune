@@ -3,10 +3,12 @@
 **English** · [Italiano](#italiano)
 
 <p align="center">
-  <img src="docs/shots/albums.png" width="240" alt="Albums">
-  <img src="docs/shots/artists.png" width="240" alt="Artists">
-  <img src="docs/shots/settings.png" width="240" alt="Settings">
+  <img src="docs/shots/artist.png" width="200" alt="Artist page">
+  <img src="docs/shots/playlist.png" width="200" alt="Playlist page">
+  <img src="docs/shots/now-playing.png" width="200" alt="Now playing">
+  <img src="docs/shots/menu.png" width="200" alt="Player menu">
 </p>
+<p align="center"><sub>Real screenshots, taken on a OnePlus 2 running ztOS.</sub></p>
 
 A music app for [ztOS](https://github.com/Zerone-Laboratories/ztOS) (the
 ztMETRO phone shell), written with the official ztOS SDK: Python + Qt Widgets,
