@@ -74,7 +74,14 @@ fi
 
 # 3. the phone has what the app needs ------------------------------------------
 say "checking the phone (python, pyside6, Qt, ztMETRO shell)"
-run "${SDK[@]}" doctor --device "$DEVICE"
+if ! run "${SDK[@]}" doctor --device "$DEVICE"; then
+  warn "the phone is missing something the SDK can set up (usually Qt for Python's compiled files)."
+  warn "The next step does it, once, and asks for the phone's root password (su): run this installer"
+  warn "in a terminal, or export ZTOS_ROOT_PASSWORD. Nothing is changed on the phone before that."
+  if [ "$DRY" = 0 ] && [ ! -t 0 ] && [ -z "${ZTOS_ROOT_PASSWORD:-}" ]; then
+    die "no terminal to ask the root password on. Re-run ./install.sh from a terminal."
+  fi
+fi
 
 # 4. the Slipmat daemon: this app is only its touch interface -------------------
 if [ "$DRY" = 0 ]; then
