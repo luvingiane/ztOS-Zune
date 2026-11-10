@@ -104,4 +104,19 @@ if os.environ.get("ZUNE_SWAP0"):
     except Exception as _e:
         print("zunehd: ZUNE_SWAP0 failed:", _e, flush=True)
 
+def _busy():
+    try:
+        if app._finger.active:
+            return True
+        page = app.page
+        if hasattr(page, "current"):
+            page = page.current()
+        return bool(page._flinging())
+    except Exception:
+        return False
+
+
+import art as _art
+_art.PAUSE_WHEN = _busy           # no cover downloads while the user scrolls
+
 app.run(music)

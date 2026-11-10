@@ -75,6 +75,13 @@ def main():
         fails.append("NOIMG: allowed template not queued")
     art.NOIMG = False
     art.ALLOW.clear()
+    import time as _t
+    art.PAUSE_WHEN = lambda: True
+    t0 = _t.monotonic(); art._wait_for_idle(0.3); waited = _t.monotonic() - t0
+    art.PAUSE_WHEN = None
+    t0 = _t.monotonic(); art._wait_for_idle(0.3); free = _t.monotonic() - t0
+    if waited < 0.25 or free > 0.05:
+        fails.append(f"download pause broken: waited={waited:.2f} free={free:.2f}")
     if art.local_art(os.path.join(REPO, "icon.png")) is None:
         fails.append("local_art broken without NOIMG")
     import widgets

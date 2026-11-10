@@ -12,6 +12,7 @@ decoded byte lands in the page snapshot the SDK uploads as a texture.
 """
 import os
 import threading
+import time
 import urllib.request
 
 import ztos
@@ -49,6 +50,20 @@ def allow(*items):
     for it in items:
         if it:
             ALLOW.add(str(it))
+
+
+PAUSE_WHEN = None       # callable -> True while the user touches/flings: downloads wait (GIL + CPU for the GUI)
+
+
+def _wait_for_idle(max_s=3.0):
+    t0 = time.monotonic()
+    while PAUSE_WHEN is not None and time.monotonic() - t0 < max_s:
+        try:
+            if not PAUSE_WHEN():
+                return
+        except Exception:
+            return
+        time.sleep(0.1)
 
 
 _covers = None          # Settings "covers" toggle, read once (set_covers() updates it)
@@ -131,6 +146,7 @@ class _FetchThread(QThread):
                 if not self._queue:
                     return
                 template, size = self._queue.pop(0)
+            _wait_for_idle()
             url = art_url(template, size)
             path = cache_path(template, size)
             ok = False
