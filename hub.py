@@ -302,9 +302,23 @@ class DetailPage(ztos.Page):
                 mosaic = _art.mosaic_image(paths, 300)
                 if mosaic is not None:
                     self._mosaic = mosaic
-        self._header_block(header)
+        # the daemon's `open` returns SONGS for album/playlist pages but ALBUMS
+        # for an artist page (verified on B 10/11): split by entry kind so an
+        # album row opens its page instead of being "played" as a track
+        songs = [e for e in entries if e.get("kind", "song") == "song"]
+        others = [e for e in entries if e.get("kind", "song") != "song"]
+        self._entries = songs
+        self._header_block(header, n_others=len(others))
         np = backend.now_playing()
-        for i, e in enumerate(entries):
+        if others:
+            self.section("albums" if all(e.get("kind") == "album" for e in others) else "more")
+            for e in others:
+                self.add(Row(rtitle(e), e.get("subtitle", ""), art=e.get("artworkTemplate", ""),
+                             on_tap=lambda e=e: ztos.App.current.push(
+                                 DetailPage(e.get("pageKind", e.get("kind", "album")), e.get("id", ""), rtitle(e)))))
+        if songs and others:
+            self.section("songs")
+        for i, e in enumerate(songs):
             cur = (np.get("title") == rtitle(e) and np.get("artist") == e.get("artist", ""))
             self.add(Row(rtitle(e), e.get("subtitle", ""), e.get("durationMs", 0),
                          art=e.get("artworkTemplate", ""), accent=cur,
@@ -325,7 +339,7 @@ class DetailPage(ztos.Page):
             ztos.notify("unavailable", reason)
         ztos.App.current.push(player.NowPlaying(ztos.App.current))
 
-    def _header_block(self, header):
+    def _header_block(self, header, n_others=0):
         from PySide6.QtWidgets import QWidget, QHBoxLayout
         row = QWidget()
         lay = QHBoxLayout(row)
@@ -347,7 +361,7 @@ class DetailPage(ztos.Page):
         sub.setStyleSheet("color: rgba(255,255,255,0.6);")
         n = len(self._entries)
         total = sum(e.get("durationMs", 0) for e in self._entries)
-        meta = QLabel(f"{n} tracks · {fmt_ms(total)}" if n else "")
+        meta = QLabel(f"{n} tracks · {fmt_ms(total)}" if n else (f"{n_others} albums" if n_others else ""))
         meta.setFont(ztos._font(ztos.FONT_REGULAR, 13))
         meta.setStyleSheet("color: rgba(255,255,255,0.45);")
         tv.addWidget(name)
@@ -357,6 +371,9 @@ class DetailPage(ztos.Page):
         lay.addWidget(texts, 1)
         self.add(row)
         # action row: play / shuffle / queue / more (detail_page.rs header buttons)
+        if not n:                       # artist page: albums only, nothing to play/shuffle
+            self.space(4)
+            return
         actions = self.round_buttons(
             CircleButton(icons.path("play"), on_tap=self._play_all),
             CircleButton(icons.path("shuffle"), on_tap=self._play_shuffled),

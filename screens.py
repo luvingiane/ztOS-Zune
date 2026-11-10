@@ -11,7 +11,7 @@ refresh, quit daemon, about.
 import ztos
 import icons
 from PySide6.QtCore import QPointF, QRectF, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QPainter
+from PySide6.QtGui import QColor, QFontMetricsF, QPainter
 from PySide6.QtWidgets import QAbstractSlider
 
 from client import backend, rtitle, unplayable_ids, is_available
@@ -205,10 +205,71 @@ class QueuePage(ztos.Page):
 
 FILTERS = [("all", "all"), ("songs", "songs"), ("albums", "albums"),
            ("artists", "artists"), ("playlists", "playlists")]
+# result sections, in display order: (entry kind, header, rows shown in "all")
+SECTIONS = [("artist", "artists", 3), ("album", "albums", 4), ("song", "songs", 6),
+            ("playlist", "playlists", 3)]
+KIND_FILTER = {"artist": "artists", "album": "albums", "song": "songs", "playlist": "playlists"}
+
+
+def group_results(results):
+    """Group search entries by kind, in the section order (artists, albums,
+    songs, playlists). Returns [(kind, header, [rows])] without empty groups."""
+    out = []
+    for kind, header, _cap in SECTIONS:
+        rows = [r for r in results if r.get("kind") == kind]
+        if rows:
+            out.append((kind, header, rows))
+    return out
+
+
+class FilterBar(ztos.Entry):
+    """The category chips under the search field: all / songs / albums /
+    artists / playlists. The selected one is in the accent colour."""
+
+    H = 40
+
+    def __init__(self, current, on_pick):
+        super().__init__("", "")
+        self._current = current
+        self._on_pick = on_pick
+        self.setFixedHeight(self.H)
+        self._font = ztos._font(ztos.FONT_REGULAR, 15)
+        fm = QFontMetricsF(self._font)
+        self._spans = []                  # (key, label, x, w)
+        x = 0.0
+        for key, label in FILTERS:
+            w = fm.horizontalAdvance(label)
+            self._spans.append((key, label, x, w))
+            x += w + 18
+
+    def set_current(self, key):
+        self._current = key
+        self.redraw()
+
+    def draw(self, p: QPainter):
+        p.setRenderHints(QPainter.TextAntialiasing)
+        p.setFont(self._font)
+        for key, label, x, w in self._spans:
+            sel = key == self._current
+            p.setPen(ztos.accent() if sel else QColor(255, 255, 255, 150))
+            p.drawText(QPointF(x, 26), label)
+            if sel:
+                p.fillRect(QRectF(x, 31, w, 2), ztos.accent())
+
+    def mouseReleaseEvent(self, event):
+        super().mouseReleaseEvent(event)
+        x = event.position().x()
+        for key, _label, sx, w in self._spans:
+            if sx - 9 <= x <= sx + w + 9:
+                self._on_pick(key)
+                return
 
 
 class SearchPage(ztos.Page):
-    """Search the catalog+library: field on top, results as rows, debounce."""
+    """Search the catalog+library: field + category chips on top, results
+    grouped into Artists / Albums / Songs / Playlists (headers, "see all"),
+    350 ms debounce. Artist -> artist page (its albums), album/playlist ->
+    their page, song -> plays the song results from that row."""
 
     def __init__(self):
         super().__init__("search")
@@ -221,58 +282,68 @@ class SearchPage(ztos.Page):
         self._filter = st.get("search_filter", "all")
         if self._filter not in dict(FILTERS):
             self._filter = "all"
-        self._filter_btn = CircleButton(icons.path("more"), f"filter: {self._filter}",
-                                            self._filter_menu)
-        self.bar(self._filter_btn)
+        self._chips = FilterBar(self._filter, self._set_filter)
+        self.add(self._chips)
+        self._fixed = self.list.count()          # field + chips + stretch: kept on refresh
+        self._songs = []
 
     def shown(self):
         self._box.field.setFocus(Qt.MouseFocusReason)
-
-    def _filter_menu(self):
-        ztos.menu(self, [(f"{label}{'  ✓' if key == self._filter else ''}",
-                          (lambda k=key: self._set_filter(k))) for key, label in FILTERS])
 
     def _set_filter(self, key):
         self._filter = key
         st = ztos.store("zunehd")
         st["search_filter"] = key
         st.save()
-        self._filter_btn.set_label(f"filter: {key}")
+        self._chips.set_current(key)
         self._debounce.start()
+
+    def _clear_results(self):
+        while self.list.count() > self._fixed:
+            item = self.list.takeAt(self._fixed - 1)
+            if item.widget() is not None:
+                item.widget().deleteLater()
 
     def _run(self):
         q = self._box.text().strip()
         results = backend.search(q, self._filter) if q else []
-        while self.list.count() > 2:               # keep field (0) and stretch
-            item = self.list.takeAt(1)
-            if item.widget() is not None:
-                item.widget().deleteLater()
+        self._clear_results()
         if q and not results:
             from hub import Notice
-            self.list.insertWidget(self.list.count() - 1,
-                                   Notice("no results" if backend.live else
-                                          (backend.demo_notice or "demo data")))
-        for r in results:
-            row = Row(rtitle(r), r.get("subtitle", ""), r.get("durationMs", 0),
-                      art=r.get("artworkTemplate", ""),
-                      on_tap=(lambda r=r: self._open(r)))
-            self.list.insertWidget(self.list.count() - 1, row)
+            self.add(Notice("no results" if backend.live else (backend.demo_notice or "demo data")))
+        self._songs = [r for r in results if r.get("kind") == "song"]
+        for kind, header, rows in group_results(results):
+            cap = dict((k, c) for k, _h, c in SECTIONS)[kind]
+            shown = rows if self._filter != "all" else rows[:cap]
+            self.section(header)
+            for r in shown:
+                self.add(self._make_row(r))
+            if self._filter == "all" and len(rows) > cap:
+                self.add(Row(f"see all {header}", f"{len(rows)} results",
+                             on_tap=lambda k=kind: self._set_filter(KIND_FILTER[k])))
+
+    def _make_row(self, r):
+        kind = r.get("kind")
+        art = r.get("artworkTemplate", "")
+        if kind == "song":
+            return Row(rtitle(r), r.get("subtitle", ""), r.get("durationMs", 0), art=art,
+                       available=is_available(r), on_tap=lambda r=r: self._play_song(r))
+        return Row(rtitle(r), r.get("subtitle", ""), art=art, on_tap=lambda r=r: self._open(r))
+
+    def _play_song(self, r):
+        i = next((k for k, s in enumerate(self._songs) if s is r), 0)
+        sent, reason = backend.play_list(self._songs, i)
+        if not sent:
+            ztos.notify("cannot play", reason or "slipmatd not ready")
+            return
+        if reason:
+            ztos.notify("unavailable", reason)
 
     def _open(self, r):
         import hub
         kind = r.get("kind")
-        if kind == "song":
-            sid = r.get("catalogId") or ""
-            if not sid:
-                ztos.notify("cannot play", "this track cannot be streamed (catalog_id is null)")
-            else:
-                backend.play_ids([sid], 0)
-        elif kind in ("album", "artist", "playlist"):
-            self._app_push(hub.DetailPage(r.get("pageKind", kind), r.get("id", ""), rtitle(r)))
-
-    def _app_push(self, page):
-        app = ztos.App.current
-        app.push(page)
+        if kind in ("album", "artist", "playlist"):
+            ztos.App.current.push(hub.DetailPage(r.get("pageKind", kind), r.get("id", ""), rtitle(r)))
 
 
 class SettingsPage(ztos.Page):
