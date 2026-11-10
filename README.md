@@ -21,8 +21,9 @@ album and playlist pages.
 It is a **client of [Slipmat](https://github.com/SoftARV/Slipmat)'s daemon
 `slipmatd`** (Apple Music for Linux): Slipmat does the sign-in, the library and
 the playback; this app is only the touch interface, talking to the daemon's
-Unix socket. This repository is a fork of Slipmat and the app lives on the
-`ztOS-Zune` branch.
+Unix socket. This is an independent project, not a fork: it only needs
+Slipmat's daemon installed and running, and it owes Slipmat a lot (see
+[Acknowledgements](#acknowledgements)).
 
 > Unofficial. Not affiliated with or endorsed by Apple, Microsoft, Slipmat's
 > author or the ztOS project. "Zune" is a Microsoft trademark, used here only
@@ -144,7 +145,8 @@ impostazioni), pagine di artista, album e playlist a tutta larghezza.
 È un **client del demone `slipmatd` di [Slipmat](https://github.com/SoftARV/Slipmat)**
 (Apple Music per Linux): Slipmat gestisce accesso, libreria e riproduzione;
 questa app è solo l'interfaccia touch, e parla col socket Unix del demone.
-Questo repository è un fork di Slipmat e l'app sta nel branch `ztOS-Zune`.
+È un progetto indipendente, non un fork: gli serve solo il demone di Slipmat
+installato e attivo, e deve molto a Slipmat (vedi [Ringraziamenti](#ringraziamenti)).
 
 > Non ufficiale. Nessun legame con Apple, Microsoft, l'autore di Slipmat o il
 > progetto ztOS. "Zune" è un marchio Microsoft, usato solo per descrivere
