@@ -1,138 +1,133 @@
-# IPC.md — protocollo del socket di `slipmatd` (come letto dai sorgenti)
+# IPC.md — the `slipmatd` socket protocol (as read from the sources)
 
-Sorgente: Slipmat 0.12.0 in `~/oneplus2/build/slipmat/Slipmat-0.12.0`
-(GPL-3.0-or-later). Citazioni `file:riga` rilette il 2026-11-07.
-Riferimento client esistente: `crates/climat/src/link.rs` (106 righe).
+Source: Slipmat 0.12.0 (GPL-3.0-or-later). `file:line` citations re-read on
+2026-11-07. Existing client reference: `crates/climat/src/link.rs` (106 lines).
 
-## 1. Trasporto
+## 1. Transport
 
-- Socket Unix: `$XDG_RUNTIME_DIR/slipmat.sock`
+- Unix socket: `$XDG_RUNTIME_DIR/slipmat.sock`
   (`crates/slipmat-core/src/ipc.rs:31-38`, `socket_path`).
-- **Newline-delimited JSON**: un messaggio per riga, `\n` in coda
+- **Newline-delimited JSON**: one message per line, `\n` at the end
   (`crates/slipmatd/src/serve.rs:732-734`: `serde_json::to_vec(&event)` +
   `line.push(b'\n')` + `write_all`).
-- Se il socket non c'è, il primo client **avvia il demone** (stesso dir
-  dell'eseguibile) con `setsid` e aspetta fino a 10 s che si metta in ascolto
-  (`ipc.rs:48-108`, `connect_or_spawn`).
-- Una connessione = un flusso: si mandano richieste e arrivano eventi; **la
-  risposta a una richiesta arriva come evento**, non accoppiata
-  (`climat/src/link.rs:5-11`). Al connect il client manda subito
+- If the socket is missing, the first client **starts the daemon** (same
+  directory as the executable) with `setsid` and waits up to 10 s for it to
+  listen (`ipc.rs:48-108`, `connect_or_spawn`).
+- One connection = one stream: requests go out and events come in; **the
+  answer to a request arrives as an event**, not paired with it
+  (`climat/src/link.rs:5-11`). On connect the client immediately sends
   `subscribe`, `stage`, `snapshot`, `queue` (`climat/src/link.rs:96-101`).
-- Gli eventi sono broadcast a tutti i client (`serve.rs:57` `events:
+- Events are broadcast to all clients (`serve.rs:57` `events:
   broadcast::Sender<Event>`, `:187` `broadcast::channel(BACKLOG)`).
 
-## 2. Convenzioni dei nomi
+## 2. Naming conventions
 
-- Campi **snake_case**, tag **camelCase** (`ipc.rs:13-15`).
-- `Request` è `#[serde(tag = "req")]`, `Event` è `#[serde(tag = "event")]`
+- Fields are **snake_case**, tags are **camelCase** (`ipc.rs:13-15`).
+- `Request` is `#[serde(tag = "req")]`, `Event` is `#[serde(tag = "event")]`
   (`ipc.rs:120-121`, `:416-417`).
-- Il client manda **intenti**, mai stato; il demone è l'unico che possède
-  coda e stato (`ipc.rs:17-20`).
+- The client sends **intents**, never state; the daemon is the only owner of
+  the queue and the state (`ipc.rs:17-20`).
 
-## 3. Client → demone: `Request` (`ipc.rs:123-272`)
+## 3. Client → daemon: `Request` (`ipc.rs:123-272`)
 
-| tag `req` | campi | riga |
+| `req` tag | fields | line |
 |---|---|---|
-| `transport` | `Transport` (vedi §5) | :126 |
+| `transport` | `Transport` (see §5) | :126 |
 | `jumpTo` | `{index}` | :131 |
 | `snapshot` | — | :136 |
 | `queue` | — | :140 |
 | `stage` | — | :148 |
 | `subscribe` | — | :152 |
-| `signIn` | — (mostra la finestra Apple) | :160 |
+| `signIn` | — (shows the Apple window) | :160 |
 | `signOut` | — | :165 |
-| `browse` | `{view, query="", offset=0, limit=0, sort, reverse=false}` — `limit=0` = "tutto il resto"; il demone ordina PRIMA di fare la finestra | :170 |
-| `search` | `{query, filter=all, offset=0}` — cerca in tutto il catalogo Apple | :197 |
-| `open` | `{kind, id}` — apre album/artista/playlist (catalog o library) | :209 |
-| `enqueue` | `{ids, next=false}` — accoda senza ricostruire la coda | :216 |
+| `browse` | `{view, query="", offset=0, limit=0, sort, reverse=false}` — `limit=0` = "the rest"; the daemon sorts BEFORE windowing | :170 |
+| `search` | `{query, filter=all, offset=0}` — searches the whole Apple catalog | :197 |
+| `open` | `{kind, id}` — opens an album/artist/playlist (catalog or library) | :209 |
+| `enqueue` | `{ids, next=false}` — queues without rebuilding the queue | :216 |
 | `removeFromQueue` | `{index}` | :225 |
 | `moveInQueue` | `{from, to}` | :230 |
 | `clearQueue` | — | :234 |
 | `write` | `{action, id}` — favorite/unfavorite/addToLibrary/removeFromLibrary | :238 |
-| `refresh` | — (ri-legge la libreria da Apple) | :243 |
-| `play` | `{ids, index=0, start=clicked\|inOrder\|shuffled}` — costruisce la coda e parte | :251 |
-| `quit` | — (rifiutato se altri client sono attaccati) | :270 |
+| `refresh` | — (re-reads the library from Apple) | :243 |
+| `play` | `{ids, index=0, start=clicked\|inOrder\|shuffled}` — builds the queue and starts | :251 |
+| `quit` | — (refused if other clients are attached) | :270 |
 
-Esempi wire (dai test in `ipc.rs:563-576`):
+Wire examples (from the tests in `ipc.rs:563-576`):
 `{"req":"transport","cmd":"seek","position_ms":4200}`,
 `{"req":"subscribe"}`.
 
-### Enum di supporto
+### Supporting enums
 
 - `View` (`ipc.rs:339`): `songs | albums | artists | playlists`.
 - `SortBy` (`slipmat-core/src/sort.rs:23-40`): `title | artist | album | year |
-  added | updated`; per vista: songs→title/artist/album/year,
+  added | updated`; per view: songs→title/artist/album/year,
   albums→title/artist/year/added, playlists→title/added/updated,
   artists→title (`sort.rs:52-59`).
 - `CatalogFilter` (`ipc.rs:281`): `all | songs | albums | artists | playlists`
-  → `types=songs,albums,artists,playlists` ecc. (`ipc.rs:305-318`).
+  → `types=songs,albums,artists,playlists` etc. (`ipc.rs:305-318`).
 - `PageKind` (`ipc.rs:354`): `album | artist | playlist | libraryAlbum |
-  libraryArtist | libraryPlaylist` — gli id catalog e library **non** sono
-  intercambiabili (`ipc.rs:357-364`).
+  libraryArtist | libraryPlaylist` — catalog and library ids are **not**
+  interchangeable (`ipc.rs:357-364`).
 - `PlayMode` (`ipc.rs:370`): `clicked | inOrder | shuffled`.
 - `WriteAction` (`ipc.rs:329`): `favorite | unfavorite | addToLibrary |
   removeFromLibrary`.
 
-## 4. Demone → client: `Event` (`ipc.rs:418-489`)
+## 4. Daemon → client: `Event` (`ipc.rs:418-489`)
 
-| tag `event` | payload | riga |
+| `event` tag | payload | line |
 |---|---|---|
-| `snapshot` | `Snapshot` (brano corrente piatto, vedi §6) | :420 |
-| `queue` | `{items: [QueueItem], position}` — lista intera | :426 |
-| `stage` | `Stage` tag `stage`: `connecting | ready | signedOut | broken{detail}` | :433 |
-| `rows` | `{view, entries: [Entry], total}` — risposta a `browse` | :437 |
-| `results` | `{query, entries, offset, more}` — risposta a `search` | :451 |
-| `page` | `{kind, id, header: Entry, entries: [Entry]}` — risposta a `open` | :466 |
-| `libraryChanged` | — invalidazione, il client ri-chiede la pagina che disegna | :477 |
+| `snapshot` | `Snapshot` (flat current track, see §6) | :420 |
+| `queue` | `{items: [QueueItem], position}` — the whole list | :426 |
+| `stage` | `Stage` with tag `stage`: `connecting | ready | signedOut | broken{detail}` | :433 |
+| `rows` | `{view, entries: [Entry], total}` — answer to `browse` | :437 |
+| `results` | `{query, entries, offset, more}` — answer to `search` | :451 |
+| `page` | `{kind, id, header: Entry, entries: [Entry]}` — answer to `open` | :466 |
+| `libraryChanged` | — invalidation; the client re-requests the page it draws | :477 |
 | `libraryRefreshing` | `{refreshing: bool}` | :481 |
 | `error` | `{detail}` | :485 |
 
-## 5. `Transport` (`ipc.rs:394-416`), tag `cmd` camelCase
+## 5. `Transport` (`ipc.rs:394-416`), `cmd` tag in camelCase
 
 `play | pause | playPause | next | previous |
-seek{position_ms} (assoluto, ms) | setVolume{volume: f64 0..1} |
-setShuffle{shuffle: bool} | setRepeat{mode}` con `RepeatMode` =
+seek{position_ms} (absolute, ms) | setVolume{volume: f64 0..1} |
+setShuffle{shuffle: bool} | setRepeat{mode}` with `RepeatMode` =
 `none | one | all` (lowercase, `player/protocol.rs:186-191`).
 
-## 6. Strutture dati
+## 6. Data structures
 
 - `Snapshot` (`ipc.rs:520-543`): `track_id?, title, artist, album,
-  art_path? (file locale già scaricato), position_ms, duration_ms, playing,
-  busy, volume, shuffle, repeat, can_next, can_previous`.
+  art_path? (an already downloaded local file), position_ms, duration_ms,
+  playing, busy, volume, shuffle, repeat, can_next, can_previous`.
 - `QueueItem` (`ipc.rs:496-517`): `id?, title, artist, album, duration_ms`
-  (`id` = catalog id se c'è, else library id; opaco, torna indietro in `jumpTo`).
-- `Entry` (`slipmat-core/src/entry.rs:18-24`), tag `kind` camelCase:
+  (`id` = catalog id if there is one, else library id; opaque, it goes back in
+  `jumpTo`).
+- `Entry` (`slipmat-core/src/entry.rs:18-24`), `kind` tag in camelCase:
   `song(Track) | album(Album) | artist(Artist) | playlist(Playlist)`.
   - `Track` (`music/types.rs:23-73`): `date_added, year, favorite, in_library,
-    library_id?, id, catalog_id? (None = non streamabile), title, artist, album,
+    library_id?, id, catalog_id? (None = not streamable), title, artist, album,
     duration_ms, track_number, artwork?`.
-  - `Artwork` (`types.rs:91-127`): è un **template URL**
+  - `Artwork` (`types.rs:91-127`): a **URL template**
     `https://is1.mzstatic.com/image/thumb/.../{w}x{h}bb.jpg`;
-    `url(size)` sostituisce `{w}/{h}/{f}` (`types.rs:107-113`);
-    `cache_key()` = FNV-1a del template (`types.rs:116-126`).
-    **I client non parlano con Apple per l'arte**: il demone serve `art_path`
-    locale nello `Snapshot`; per le righe, `artwork.url(size)` si risolve in
-    locale (la demo di Slipmat lo fa via cache; da verificare come `climat`
-   /`slipmat` ottengono le copertine delle liste — in ogni caso il token Apple
-    resta nel demone, il client può usare `art_path` dello snapshot e per le
-    liste chiedere `browse`/`open` i cui `Entry` portano `artwork` template:
-    da chiarire se il demone cachea anche quelle; in caso contrario il client
-    mostra placeholder per le copertine di lista e usa `art_path` per il
-    brano corrente).
+    `url(size)` substitutes `{w}/{h}/{f}` (`types.rs:107-113`);
+    `cache_key()` = FNV-1a of the template (`types.rs:116-126`).
+    The daemon serves the current track's cover as a local `art_path` in the
+    `Snapshot`; list covers come from the `artwork` template carried by the
+    `Entry` objects of `browse`/`open` (this app downloads and caches them,
+    see `art.py`).
   - `Album` (`types.rs:130-148`): `id, date_added, name, artist, artwork?,
     year, track_count, library`.
   - `Playlist` (`types.rs:150-175`): `id, date_added, last_modified, name,
     curator, description, artwork?, library`.
   - `Artist` (`types.rs:177-187`): `id, name, artwork?, genres, library`.
-  - `Entry::subtitle()` (`entry.rs:44-66`): song → `"artista — album"`;
-    album → `"artista · anno"`; artist → generi; playlist → curator.
-  - `Entry::page_target()` (`entry.rs:78-99`): album/artist/playlist aprono
-    pagina (`PageKind` library se `library=true`).
-- `format_duration(ms)` → `m:ss` o `h:mm:ss` (`types.rs:75-82`).
+  - `Entry::subtitle()` (`entry.rs:44-66`): song → `"artist — album"`;
+    album → `"artist · year"`; artist → genres; playlist → curator.
+  - `Entry::page_target()` (`entry.rs:78-99`): album/artist/playlist open a
+    page (library `PageKind` if `library=true`).
+- `format_duration(ms)` → `m:ss` or `h:mm:ss` (`types.rs:75-82`).
 
-## 7. Dispatch lato demone (`slipmatd/src/serve.rs`)
+## 7. Daemon-side dispatch (`slipmatd/src/serve.rs`)
 
 `Request::Transport → :921`, `Browse → :794`, `Search → :820`, `Open → :828`,
 `Play → :852`, `Enqueue → :856`, `Snapshot/Stage/Queue → :776-781`,
-`JumpTo → :782`. Gli snapshot vengono anche spinti da soli sui cambi di stato
+`JumpTo → :782`. Snapshots are also pushed on their own on state changes
 (`serve.rs:157` `publish(Event::Snapshot(...))`).

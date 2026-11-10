@@ -74,8 +74,18 @@ python3 .sdk/ztos/sdk/bin/ztos-sdk run      # 360x640 window on the PC
 python3 .sdk/ztos/sdk/bin/ztos-sdk build    # dist/dev.oneplus2.zunehd (aarch64)
 ```
 
-Install on the phone: see [INSTALL.md](INSTALL.md) (Italian). The app id is
-`dev.oneplus2.zunehd`; the manifest is [ztos.toml](ztos.toml).
+## Install on the phone
+
+```sh
+./install.sh                      # build, install and open the app (phone at zerone@172.16.42.1)
+./install.sh --device user@host   # another phone or address
+./install.sh --uninstall          # remove it again
+```
+
+The installer fetches the SDK if needed, checks the phone (`ztos-sdk doctor`),
+warns if `slipmatd` is missing and installs the app. Details and the manual
+steps: [INSTALL.md](INSTALL.md). The app id is `dev.oneplus2.zunehd`; the
+manifest is [ztos.toml](ztos.toml).
 
 ## Tests
 
@@ -100,14 +110,15 @@ Same for `test_hero.py`, `test_search.py`, `test_warm.py`, `test_buttons.py`,
 | `client.py`, `slipmat/ipc.py` | `slipmatd` socket client |
 | `art.py`, `widgets.py` | cover cache/fetch, rows and buttons |
 | `IPC.md` | the daemon protocol as read from its source |
-| `DESIGN.md`, `FEATURES-PARITY.md`, `STATO.md` | design notes, parity with Slipmat's own UI, work log (Italian) |
+| `FEATURES-PARITY.md`, `PLAYER-OPTIONS.md`, `PERF-ON-B.md` | parity with Slipmat's own UI, the player menu, performance measuring |
+| `install.sh` | the installer |
 
 ## Known limits
 
 - Smoothness on the OnePlus 2 depends on the GPU/kernel state of the phone: a
   long uptime on one kernel build produced GPU submit failures (visible as
   scroll glitches) that went away after a reboot. Measurements are in
-  [PERF-ON-B.md](PERF-ON-B.md) and [STATO.md](STATO.md).
+  [PERF-ON-B.md](PERF-ON-B.md).
 - Unplayable tracks follow what the daemon reports.
 
 ## License and credits
@@ -200,8 +211,18 @@ python3 .sdk/ztos/sdk/bin/ztos-sdk run      # finestra 360x640 sul PC
 python3 .sdk/ztos/sdk/bin/ztos-sdk build    # dist/dev.oneplus2.zunehd (aarch64)
 ```
 
-Installazione sul telefono: vedi [INSTALL.md](INSTALL.md) (in italiano). L'id
-dell'app è `dev.oneplus2.zunehd`; il manifesto è [ztos.toml](ztos.toml).
+## Installare sul telefono
+
+```sh
+./install.sh                      # compila, installa e apre l'app (telefono a zerone@172.16.42.1)
+./install.sh --device user@host   # un altro telefono o indirizzo
+./install.sh --uninstall          # la toglie di nuovo
+```
+
+L'installer scarica l'SDK se serve, controlla il telefono (`ztos-sdk doctor`),
+avvisa se manca `slipmatd` e installa l'app. Dettagli e passi manuali:
+[INSTALL.md](INSTALL.md) (in inglese). L'id dell'app è `dev.oneplus2.zunehd`;
+il manifesto è [ztos.toml](ztos.toml).
 
 ## Test
 
@@ -226,14 +247,15 @@ Lo stesso per `test_hero.py`, `test_search.py`, `test_warm.py`,
 | `client.py`, `slipmat/ipc.py` | client del socket di `slipmatd` |
 | `art.py`, `widgets.py` | cache/download copertine, righe e pulsanti |
 | `IPC.md` | il protocollo del demone, come letto dal suo sorgente |
-| `DESIGN.md`, `FEATURES-PARITY.md`, `STATO.md` | note di design, parità con la UI di Slipmat, diario di lavoro (in italiano) |
+| `FEATURES-PARITY.md`, `PLAYER-OPTIONS.md`, `PERF-ON-B.md` | parità con la UI di Slipmat, menu del player, misure di prestazioni (in inglese) |
+| `install.sh` | l'installer |
 
 ## Limiti noti
 
 - La fluidità sul OnePlus 2 dipende dallo stato di GPU/kernel del telefono:
   una lunga accensione con una certa build del kernel ha prodotto errori di
   invio alla GPU (visibili come scatti nello scorrimento) spariti dopo un
-  riavvio. Le misure sono in [PERF-ON-B.md](PERF-ON-B.md) e [STATO.md](STATO.md).
+  riavvio. Le misure sono in [PERF-ON-B.md](PERF-ON-B.md).
 - I brani non riproducibili seguono ciò che segnala il demone.
 
 ## Licenza e crediti

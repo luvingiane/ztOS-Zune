@@ -1,62 +1,29 @@
-# PERF-ON-B.md — misure sul telefono B (solo il proprietario le esegue; B non si tocca da qui)
+# PERF-ON-B.md — measuring performance on the phone
 
-Scopo: con `ZUNE_PERF=1` sia **Zune HD** (`dev.oneplus2.zunehd`) sia l'app
-minima di riferimento (**Zune Ref**, `dev.oneplus2.zuneref`) scrivono nel loro
-log (`~/.local/state/ztos/<id>.log`) una riga `zune-perf` al secondo con:
-frame/s (paintGL), swap/s (frameSwapped = frame presentati), intervallo
-frame-to-frame avg/min/max (d_paint e d_swap), ms CPU dentro `zsdk_draw` e
-numero di quad, frame con quad identici al precedente (`identical` =
-aggiornamenti senza cambio di contenuto), texture caricate (numero/byte/dim),
-**texture vive sulla GPU (`tex_live`, `tex_live_bytes` — per il budget GPU:
-mai errori `MESA: error` nel log)**, ms delle passate raster Qt, refresh del
-layer, paint dei widget, cambi di contenuto (`changes`). Vedi `perf.py` per
-il formato esatto.
+Purpose: with `ZUNE_PERF=1` the app writes, once per second, a `zune-perf`
+line to its log (`~/.local/state/ztos/<id>.log`) with: frames/s (paintGL),
+swaps/s (frameSwapped = frames presented), frame-to-frame interval avg/min/max
+(`d_paint` and `d_swap`), CPU ms inside `zsdk_draw` and the number of quads,
+frames whose quads are identical to the previous one (`identical` = updates
+without a content change), textures uploaded (count/bytes/size), **textures
+alive on the GPU (`tex_live`, `tex_live_bytes` — the GPU budget: there must be
+no `MESA: error` in the log)**, ms of Qt raster passes, layer refreshes, widget
+paints and content changes (`changes`). See `perf.py` for the exact format.
 
-Obiettivo: ≥ 30 fps reali (d_swap avg ≤ 33 ms), 60 se possibile (≤ 16.7 ms).
+Goal: ≥ 30 real fps (`d_swap` avg ≤ 33 ms), 60 if possible (≤ 16.7 ms).
 
-## 0) Voci di misura: ora disattivate (una sola app nel menu)
-Su B le voci perf/profile sono rinominate `.disabled-<data>` (DEPLOY-B.md §8).
-Per riattivarle: `mv dev.oneplus2.zunehd-perf.desktop.disabled-<data> dev.oneplus2.zunehd-perf.desktop`
-(come zerone) + `printf 'apps\n' > /run/user/1000/ztmetro.ctl`.
+## 1) Install and start with the counters on
 
-## 1) Copia i due binari su B (dal PC)
+Install normally ([INSTALL.md](INSTALL.md)). From a shell **inside the ztOS
+session** (the same environment as the menu: `FD_MESA_DEBUG=sysmem`,
+`QT_QPA_PLATFORM=wayland`, `ZTMETRO_SCALE=3`):
 
 ```sh
-cd ~/Github_Clones/ztos-zune-sdk
-ssh <user>@<phone-ip> 'mkdir -p ~/.local/share/ztos/apps ~/.local/share/applications ~/.local/share/icons/hicolor/scalable/apps'
-scp dist/dev.oneplus2.zunehd ref/dist/dev.oneplus2.zuneref <user>@<phone-ip>:~/.local/share/ztos/apps/
-ssh <user>@<phone-ip> 'chmod 755 ~/.local/share/ztos/apps/dev.oneplus2.zunehd ~/.local/share/ztos/apps/dev.oneplus2.zuneref'
-ssh <user>@<phone-ip> 'cat > ~/.local/share/icons/hicolor/scalable/apps/dev.oneplus2.zuneref.svg' < ref/icon.svg
-ssh <user>@<phone-ip> 'cat > ~/.local/share/applications/dev.oneplus2.zuneref.desktop' <<'DESKTOP'
-[Desktop Entry]
-Type=Application
-Name=Zune Ref
-Comment=Minimal SDK reference app for perf comparison
-Exec=/home/zerone/.local/share/ztos/apps/dev.oneplus2.zuneref
-Icon=dev.oneplus2.zuneref
-Terminal=false
-StartupWMClass=ztos.dev.oneplus2.zuneref
-Categories=Audio;Music;
-X-ZtOS-Id=dev.oneplus2.zuneref
-X-ZtOS-Version=0.1.0
-DESKTOP
-# (il .desktop di dev.oneplus2.zunehd è già quello di INSTALL.md)
-# fa rileggere la lista app alla shell (dentro la sessione ztOS):
-printf 'apps\n' > "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/ztmetro.ctl"
+ZUNE_PERF=1 ~/.local/share/ztos/apps/dev.oneplus2.zunehd
 ```
 
-## 2) Avvio instrumentato (ZUNE_PERF=1) — un comando per app
-
-Da una shell **dentro la sessione ztOS** (stesso ambiente del menu: lì c'è già
-`FD_MESA_DEBUG=sysmem`, `QT_QPA_PLATFORM=wayland`, `ZTMETRO_SCALE=3`):
-
-```sh
-ZUNE_PERF=1 ~/.local/share/ztos/apps/dev.oneplus2.zuneref   # rifai: lista che scorre + push pagina
-ZUNE_PERF=1 ~/.local/share/ztos/apps/dev.oneplus2.zunehd    # home: ferma, scroll, tap entra/esci
-```
-
-Se il tuo ssh **non** è nella sessione grafica, copia prima l'ambiente della
-shell (sola lettura) e poi lancia:
+If your ssh is **not** in the graphical session, copy the shell's environment
+first (read-only) and then launch:
 
 ```sh
 eval "$(tr '\0' '\n' < /proc/$(pgrep -f 'ztmetro' | head -1)/environ \
@@ -65,82 +32,68 @@ eval "$(tr '\0' '\n' < /proc/$(pgrep -f 'ztmetro' | head -1)/environ \
 ZUNE_PERF=1 ~/.local/share/ztos/apps/dev.oneplus2.zunehd
 ```
 
-In alternativa, dal menu senza toccare l'ambiente: avvia normalmente e il log
-cresce lo stesso (il bootstrap dell'SDK manda stderr nel log), ma senza
-`ZUNE_PERF=1` i contatori restano spenti — quindi per le misure usa i comandi
-sopra.
+To measure from the app menu, add a second `.desktop` entry whose `Exec=` is
+`env ZUNE_PERF=1 …/dev.oneplus2.zunehd` (and remove it when you are done, so
+the menu keeps a single entry).
 
-## 3) Cosa fare mentre gira (per scenario) e poi raccogliere il log
+## 2) What to do while it runs, then collect the log
 
-Per ogni app: (a) lascia la prima schermata ferma 5 s; (b) scorri la lista
-su e giù per 10 s; (c) entra in una pagina e torna indietro (turnstile) 3
-volte; (d) su Zune HD (stage 3: si apre sul pivot music) apri "now playing"
-dalla app bar e torna indietro.
-Poi:
+(a) leave the first screen still for 5 s; (b) scroll a list up and down for
+10 s; (c) enter a page and go back 3 times; (d) open "now playing" from the app
+bar and go back. Then:
 
 ```sh
-cat ~/.local/state/ztos/dev.oneplus2.zuneref.log
 cat ~/.local/state/ztos/dev.oneplus2.zunehd.log
-# dal PC: scp <user>@<phone-ip>:'~/.local/state/ztos/dev.oneplus2.zune*.log' /tmp/
+# from the computer: scp <user>@<phone-ip>:'~/.local/state/ztos/dev.oneplus2.zune*.log' /tmp/
 ```
 
-Mentre scrolli, annota anche: CPU libera totale (`top -bn1 | head`), clock GPU
-(la stessa misura di `gfx3d_clk_src` che hai già fatto), e quanto "va fluido"
-a occhio (1 = a scatti, 5 = fluido).
+While scrolling also note the free CPU (`top -bn1 | head`), the GPU clock, and
+how smooth it looks (1 = jerky, 5 = smooth).
 
-## 4) Modulo di risposta (compila e incolla qui / in STATO.md)
+## 3) Results sheet
 
-| app | scenario | fps (swaps/s) | d_swap avg/max ms | draw ms max | quad max | identical/s | upload byte/s | raster ms/s | paints/s | changes/s | fluido (1-5) | CPU libera | clk GPU |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| zuneref | ferma | | | | | | | | | | | | |
-| zuneref | scroll | | | | | | | | | | | | |
-| zuneref | push/pop | | | | | | | | | | | | |
-| zunehd | pivot music ferma | | | | | | | | | | | | |
-| zunehd | scroll lista (songs) | | | | | | | | | | | | |
-| zunehd | turnstile entra/esci | | | | | | | | | | | | |
-| zunehd | now playing (con player in riproduzione) | | | | | | | | | | | | |
-| zunehd | barra di avanzamento ogni 500 ms (snapshot) | | | | | | | | | | | | |
+| scenario | fps (swaps/s) | d_swap avg/max ms | draw ms max | quad max | identical/s | upload bytes/s | raster ms/s | paints/s | changes/s | smooth (1-5) | free CPU | GPU clock |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| music pivot, still | | | | | | | | | | | | |
+| list scroll (songs) | | | | | | | | | | | | |
+| page enter/exit | | | | | | | | | | | | |
+| now playing (while playing) | | | | | | | | | | | | |
+| progress bar every 500 ms (snapshot) | | | | | | | | | | | | |
 
-Lettura: se `zuneref` è a 60 fps e `zunehd` no → il costo è nel contenuto
-dell'app (raster ms/s e uploads lo dicono); se anche `zuneref` lagga →
-pipeline SDK/telefono (d_swap alto con draw ms basso = pacing/attesa frame
-Wayland; upload ms alti = costo memcpy in `sysmem`; identical alto =
- ridisegna senza cambiado). Incolla anche 3-5 righe `zune-perf` raw per
-ciascuna app.
+Reading: low `d_swap` with low `draw ms` means the app is fine; high `d_swap`
+with low `draw ms` means waiting on frame pacing (Wayland frame callbacks);
+high upload ms means memcpy cost in `sysmem`; high `identical` means redraws
+without a change.
 
-## 5) Scenario "barra che avanza a scatti" (fix stage 6b, 8/11)
-Apri **"Zune HD (perf)"** dal menu (ZUNE_PERF=1), metti in play un brano e resta
-sul player 15 s senza toccare nulla. Nel log `zune-perf` durante la
-riproduzione ci si aspetta ora: `paints` ~2/s (solo la seek bar), `raster`
-~0 ms, nessun salto di `changes`. Prima del fix ogni snapshot (ogni 500 ms,
-`serve.rs:39`) invalidava tutta la pagina → repaint full-page a DPR 3 →
-barra visibile ogni ~2 s. Riporta: `paints/s` e `raster ms/s` sul player in
-play + `top -b -H -d 2 -n 5` sul thread python3.
+## 4) The "progress bar advances in jumps" scenario
 
+Open the app with `ZUNE_PERF=1`, play a track and stay on the player for 15 s
+without touching anything. During playback the log should show `paints` ~2/s
+(only the seek bar), `raster` ~0 ms and no jump in `changes`. Before the fix
+every snapshot (every 500 ms) invalidated the whole page, causing a full-page
+repaint at DPR 3 and a bar visible only every ~2 s. Report `paints/s`,
+`raster ms/s` and `top -b -H -d 2 -n 5` on the python3 thread.
 
-## 6. Matrice di misura "è davvero un cap di pipeline?" (stage 9)
+## 5) Is it really a pipeline cap?
 
-La frase "cap di pipeline ~29 fps" NON è provata per Zune HD (ztsettings è un
-client C, non Python/Qt: non è un confronto alla pari; `LOG.md` 1/11 parla di
-draw+finish ~40 ms/frame = costo per frame, non attesa DSI). Esperimento:
+The claim "pipeline cap of ~29 fps" is **not proven** for this app. The
+experiment: run the same app with `ZUNE_PERFMODE=big` and `normal`
+(`ztos.performance()` asks the phone's power manager how to treat the app;
+`big` keeps the big cores open to it) over: scroll of the songs list (15 s),
+page push (open an album 5 times), player playing 15 s. For each case record
+the `zune-perf` lines (fps, `d_swap`, `draw_ms`, raster ms/s), `top -b -H -d 2
+-n 5` and, read-only, `cat /sys/devices/system/cpu/cpu*/cpufreq/scaling_cur_freq`.
 
-- Voci di menu (riattivare i `.desktop` disabilitati, DEPLOY-B.md §8): stessa
-  app con `Exec=env ZUNE_PERF=1 ZUNE_PERFMODE=big ...` e con `normal`.
-  `ZUNE_PERFMODE=big|eco|normal` chiama `ztos.performance()` (zrnperfd):
-  `big` tiene aperti i big core all'app.
-- Scenari: scroll lista songs (15 s), push pagina (apri album 5 volte),
-  player in play 15 s. App: ref, Zune HD, `com.zerone.music` (SDK ufficiale).
-- Per ogni caso: righe `zune-perf` (fps, d_swap, draw_ms, raster ms/s),
-  `top -b -H -d 2 -n 5` (thread python3) e, in sola lettura,
-  `cat /sys/devices/system/cpu/cpu*/cpufreq/scaling_cur_freq`.
-- Lettura: d_swap ≈ 33 ms con draw ≈ 1 ms ⇒ attesa di presentazione; thread
-  python3 > 90 % o draw_ms alto ⇒ CPU-bound (cambia con `big`?).
+Reading: `d_swap` ≈ 33 ms with `draw` ≈ 1 ms ⇒ waiting for presentation; the
+python3 thread above 90% or a high `draw_ms` ⇒ CPU-bound (does it change with
+`big`?).
 
+## 6) The swap0 experiment
 
-## 7. Esperimento swap0 (stage 9b)
-
-Voce di menu "Zune HD (swap0 test)" = `ZUNE_PERF=1 ZUNE_SWAP0=1`. Stesso scenario
-(scroll songs 15 s, push pagina) della voce normale: confronta `swaps` al secondo e
-`d_swap`. Se passa da ~30 a ~60 fps con draw_ms invariato, l'ipotesi (due attese
-seriali per frame) è confermata e si rende permanente; se non cambia o c'è
-flicker/tearing, si scarta. Rimuovere la voce a fine prova (rinomina `.disabled-…`).
+`ZUNE_SWAP0=1` makes the GL layer's swap non-blocking (swap interval 0). With
+interval 1 every frame waits for the compositor's frame callback after the
+layer swap and then the host commit waits for another one: two serial waits,
+~33 ms per frame. Run the same scenario as above with and without it and
+compare `swaps` per second and `d_swap`. If it goes from ~30 to ~60 fps with
+`draw_ms` unchanged the hypothesis holds; if nothing changes, or there is
+flicker or tearing, drop it.
