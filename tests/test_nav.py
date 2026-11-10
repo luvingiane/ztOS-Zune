@@ -94,7 +94,7 @@ def main():
     nav("play song row 0", lambda: songs_page._play(0))
     nav("pop player", lambda: zapp.pop())
     # options menu + sort menu from the player / hub
-    nav("open options", lambda: zapp.push(player.NowPlaying(zapp)) or pump(app, 0.5) or zapp.page.view._open_options())
+    nav("open options", lambda: zapp.push(player.NowPlaying(zapp)) or pump(app, 0.5) or zapp.page._open_options())
     nav("pop", lambda: zapp.pop())
     nav("sort menu", lambda: music._sort_menu())
 

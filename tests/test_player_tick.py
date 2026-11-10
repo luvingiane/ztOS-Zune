@@ -63,8 +63,8 @@ def main():
     view = page.view
     # spies
     calls = {"redraw": 0, "content_changed": 0, "bg": 0}
-    orig_redraw = view.redraw
-    orig_cc = view.content_changed
+    orig_redraw = view.update
+    orig_cc = view.update
     orig_bg = player.make_blur_bg
 
     def spy_redraw():
@@ -79,13 +79,15 @@ def main():
         calls["bg"] += 1
         return orig_bg(*a, **k)
 
-    view.redraw = spy_redraw
-    view.content_changed = spy_cc
+    view.update = spy_redraw
     player.make_blur_bg = spy_bg
 
     seek_updates = [0]
-    orig_update = view._seek.update
-    view._seek.update = lambda *a, **k: (seek_updates.__setitem__(0, seek_updates[0] + 1), orig_update(*a, **k))[1]
+    orig_pos = view._seek.set_position
+    view._seek.set_position = lambda *a, **k: (seek_updates.__setitem__(0, seek_updates[0] + 1), orig_pos(*a, **k))[1]
+    label_sets = [0]
+    orig_text = view._title.setText
+    view._title.setText = lambda *a, **k: (label_sets.__setitem__(0, label_sets[0] + 1), orig_text(*a, **k))[1]
 
     # first snapshot: full track (metadata) — allowed to redraw once
     base = {"title": "Fixture Song", "artist": "Fixture Artist", "album": "Fixture Album",
@@ -94,7 +96,7 @@ def main():
     view.set_track(dict(base))
     pump(app, 0.3)
     calls0 = dict(calls)
-    check("first track set: redraw allowed once", calls["redraw"] >= 1, str(calls))
+    check("first track set: texts set once", label_sets[0] == 1, str(label_sets))
 
     # now 8 snapshots at 500 ms cadence, same track, position advancing
     for i in range(8):
@@ -102,22 +104,19 @@ def main():
         view.set_track(snap)
         pump(app, 0.05)
 
-    check("position-only snapshots do NOT invalidate the page (no redraw)",
-          calls["redraw"] == calls0["redraw"], f"redraw {calls0['redraw']}->{calls['redraw']}")
-    check("position-only snapshots do NOT call content_changed",
-          calls["content_changed"] == calls0["content_changed"],
-          f"cc {calls0['content_changed']}->{calls['content_changed']}")
+    check("position-only snapshots do NOT touch the texts/cover (no page work)",
+          label_sets[0] == 1 and calls["redraw"] == calls0["redraw"], f"labels={label_sets[0]} redraw {calls0['redraw']}->{calls['redraw']}")
     check("blur background NOT recomputed per position snapshot",
           calls["bg"] == calls0["bg"], f"bg {calls0['bg']}->{calls['bg']}")
     check("seek bar still repaints (update called)", seek_updates[0] > 0,
           f"updates={seek_updates[0]}")
     check("position is monotonic and advanced",
-          view._seek.current_pos() > 1.0, f"pos={view._seek.current_pos():.2f}")
+          view._model.current() > 1.0, f"pos={view._model.current():.2f}")
 
     # track change -> full refresh allowed again
     view.set_track(dict(base, title="Another", track_id="c.fix2", position_ms=0))
     pump(app, 0.2)
-    check("track change DOES refresh the page", calls["redraw"] > calls0["redraw"])
+    check("track change DOES refresh the texts", label_sets[0] == 2, str(label_sets))
 
     print()
     if FAILED:

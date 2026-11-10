@@ -65,6 +65,20 @@ class Grip(QAbstractSlider):
         event.accept()
 
 
+class QueueRow(Row):
+    """A queue row with its drag handle pinned to the right edge (re-placed on
+    every resize: the row has no final width when it is built)."""
+
+    def __init__(self, *a, **k):
+        super().__init__(*a, **k)
+        self._right = GRIP_W
+        self._grip = Grip(self)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._grip.move(self.width() - GRIP_W, 0)
+
+
 class QueuePage(ztos.Page):
     """The queue. Rebuilt only when the CONTENT changes (signature of
     id+title), never on position-only events. Rows are TEXT ONLY. Tap =
@@ -117,18 +131,15 @@ class QueuePage(ztos.Page):
             self.add(Notice(backend.demo_notice or "demo data"))
         unplay = unplayable_ids()
         for i, it in enumerate(items):
-            r = Row(rtitle(it), it.get("subtitle", ""), it.get("duration_ms", 0),
-                    accent=(i == position), available=(it.get("id") not in unplay))
-            r._right = GRIP_W
+            r = QueueRow(rtitle(it), it.get("subtitle", ""), it.get("duration_ms", 0),
+                         accent=(i == position), available=(it.get("id") not in unplay))
             # indices are looked up live: the order changes while dragging
             r.tapped.connect(lambda r=r: backend.jump_to(self._row_widgets.index(r)))
             r.held.connect(lambda r=r: self._row_menu(r))
-            grip = Grip(r)
-            grip.move(r.width() - GRIP_W, 0)
+            grip = r._grip
             grip.grabbed.connect(lambda gy, r=r: self._drag_begin(r, gy))
             grip.dragged.connect(self._drag_move)
             grip.dropped.connect(self._drag_end)
-            r._grip = grip
             r._qkey = (it.get("id"), it.get("title"))
             self._row_widgets.append(r)
             self.add(r)
@@ -361,6 +372,8 @@ class SettingsPage(ztos.Page):
         st = ztos.store("zunehd")
         self.toggle("Notifiche cambio brano", on=bool(st.get("notify_track", False)),
                     on_change=lambda on: (st.__setitem__("notify_track", on), st.save()))
+        self.toggle("Sfondo sfocato nel player", on=bool(st.get("blur_bg", True)),
+                    on_change=lambda on: (st.__setitem__("blur_bg", on), st.save()))
         self.entry("about", "", self._about)
         backend.stage_changed.connect(lambda _s: self._refresh_stage())
         backend.error.connect(lambda e: ztos.notify("slipmatd", e))

@@ -70,23 +70,19 @@ def main():
     zapp = ztos.App()
 
     # ---- 2) seek position model: monotonic, stale snapshots rejected --------
-    seek = player.PlayerSeek(zapp.window)
-    seek.resize(328, 36)
-    seek.anchor(10000, 174000, True, track_key="t1")       # 10 s, playing
-    p1 = seek.current_pos()
+    seek = player.PositionModel()
+    seek.anchor(10000, 174000, True, key="t1")             # 10 s, playing
+    p1 = seek.current()
     time.sleep(0.05)
-    p2 = seek.current_pos()
+    p2 = seek.current()
     check("interpolation advances while playing", p2 > p1, f"{p1:.2f}->{p2:.2f}")
-    seek.anchor(5000, 174000, True, track_key="t1")        # stale snapshot (5 s < shown)
-    check("stale backward snapshot ignored (monotonic)", seek.current_pos() >= p2 - 0.001,
-          f"shown={seek.current_pos():.2f}")
-    seek.anchor(2000, 174000, True, track_key="t2")        # track change: accept
-    check("track change accepts new position", abs(seek.current_pos() - 2.0) < 0.3,
-          f"{seek.current_pos():.2f}")
-    seek.anchor(90000, 174000, True, track_key="t2")
-    drawn_before = seek._last_drawn
-    seek.anchor(90050, 174000, True, track_key="t2")       # < 150 ms delta
-    check("sub-150ms snapshot does not force redraw", seek._last_drawn == drawn_before)
+    seek.anchor(5000, 174000, True, key="t1")              # stale snapshot (5 s < shown)
+    check("stale backward snapshot ignored (monotonic)", seek.current() >= p2 - 0.001,
+          f"shown={seek.current():.2f}")
+    seek.anchor(2000, 174000, True, key="t2")              # track change: accept
+    check("track change accepts new position", abs(seek.current() - 2.0) < 0.3, f"{seek.current():.2f}")
+    seek.anchor(1000, 174000, False, key="t2")             # paused: accept going back
+    check("pause accepts a lower position", abs(seek.current() - 1.0) < 0.05, f"{seek.current():.2f}")
 
     # ---- 6) player page does not drag ---------------------------------------
     page = player.NowPlaying(zapp)

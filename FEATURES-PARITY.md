@@ -19,7 +19,7 @@ Original frontend: `~/oneplus2/build/slipmat/Slipmat-0.12.0/crates/slipmat/src`
 | Per-view sort incl. songs "recently added" (`app/view.rs:325-360`, `sort.rs`) | **fatta (stage 4)** | sort menu on every list; songs+"added" = client-side join on albums' date_added (Apple sends no dateAdded for library songs — proof in STATO.md) |
 | Album grid + mosaic + covers (`components/grid_item.rs`, `mosaic.rs`, `cover.rs`, `artwork.rs`) | **parziale** | grid with real artwork in `hub.AlbumGrid`/`art.Artwork` (template → FNV cache → async fetch); no mosaic (Apple playlists have no mosaic art here) |
 | Now playing: cover, seek, transport, volume, shuffle, repeat (`components/now_playing.rs`, `player_view/transport.rs`) | **fatta** | `screens.NowPlaying`: art_path/cover, SeekBar, prev/play/next, volume slider, shuffle/repeat, queue button |
-| Queue view: jump, remove, move, clear, current highlight (`components/queue_view/`) | **parziale** | `screens.QueuePage`: accent current, tap=jumpTo, hold=remove, clear; move (drag) manca — the SDK list has no drag-reorder |
+| Queue view: jump, remove, move, clear, current highlight (`components/queue_view/`) | **parziale** | `screens.QueuePage`: accent current, tap=jumpTo, hold=menu remove, clear; drag-reorder: see the stage 9 row below |
 | Play/enqueue/jumpTo (`ipc::Request::Play/Enqueue/JumpTo`) | **fatta** | `client.py` + song row tap/hold |
 | Library writes favorite/add/remove (`app/writes.rs`, `Request::Write`) | **fatta** | hold menu on songs; `libraryChanged` event refills the visible page (`hub._refill`) |
 | Refresh library (`Request::Refresh`) | **fatta** | settings "refresh library" |
@@ -35,9 +35,14 @@ Legend: fatta = implementata e testata; parziale = presente con périmètre rido
 manca = non implementata (con motivo).
 
 | Tap a track row plays from that row (`play{ids,index}`) | **fatta (stage 6)** | `hub.DetailPage._play_from` → `backend.play_list` |
-| Queue drag-to-reorder (`MoveInQueue`) | **fatta (stage 6)** | `screens.QueuePage` long-press+drag → `moveInQueue{from,to}`; no rebuild on position-only events |
+| Queue drag-to-reorder (`MoveInQueue`) | **rifatta (stage 9)** | `screens.QueuePage`: drag handle (grip, a QAbstractSlider so the SDK finger filter leaves it alone) on every row; the row is lifted, others make room live, auto-scroll at the edges, release → `moveInQueue{from,to}`; the old long-press hack did not work on B |
 | Live tile (TILE-SIGNALS.md) | **fatta (stage 6)** | `client.py` su snapshot → `ztos.tile_update`; clear se stop |
 | Track-change notifications off by default (`settings.rs:122,385-387`) | **fatta (stage 6)** | toggle in Impostazioni, default off |
 | Playlist mosaic 2x2 (`components/mosaic.rs`) | **fatta (stage 6)** | `art.mosaic_image` + header playlist senza artwork |
 | Signed/expiring artwork URLs | **fatta (stage 6)** | cache per hash URL, `art.stale` → re-browse |
 | Seek position model (monotonic, staleness guard) | **fatta (stage 6)** | `player.PlayerSeek.anchor/current_pos` |
+| Search grouped by category + filter chips (stage 9) | **fatta** | `screens.SearchPage`: Artists / Albums / Songs / Playlists sections, chips all/songs/albums/artists/playlists, "see all"; song tap plays the song results from that row |
+| Artist page (stage 9) | **fatta (limite del demone)** | `open` on an artist returns ALBUM entries only (verified on B 10/11): the page lists the albums, each opens its page; no "top songs" (the daemon does not send them) |
+| Unavailable tracks (stage 9) | **fatta** | row dimmed + slashed-circle mark when `catalog_id` is null or the id is in the daemon's `~/.cache/slipmat/unplayable.json`; `play_list` skips them and starts from the next available with a notice |
+| Player standard ztmetro (stage 9) | **fatta** | `player.NowPlaying` = `ztos.Page` + `ztos.SeekBar` + 5 `CircleButton` in the app bar + `ztos.menu` options; optional blurred background (Settings toggle) computed on a worker thread |
+| MPRIS / shell media banner | **da verificare** | the official `music` app is an MPRIS player (mpv-mpris) so the shell banner/volume show it; slipmatd MPRIS exposure not verified here |

@@ -60,6 +60,7 @@ def main():
     check("backend live (fake daemon ready)", b.connect(ready_timeout=5.0) and b.live)
     pump(app, 0.4)
 
+    os.environ["HOME"] = tmp                  # isolate ztos.store from the real one
     zapp = ztos.App()
     first = ztos.Page("music")               # real flow: a page is already on the stack
     zapp.stack.append(first)
@@ -70,71 +71,65 @@ def main():
     page.resize(360, 640)
     pump(app, 1.5)
 
-    view = page.view
-    ctrl = view.ctrl
-    # usable area = window minus shell chrome (ztmetro.c:128-131: status 28, nav 40)
-    UX0, UY0, UW, UH = 0, player.TOP_INSET, 360, 640 - player.TOP_INSET - player.BOTTOM_INSET
-    # --- five controls in one row, inside the USABLE area --------------------
-    check("five controls", sorted(ctrl) == ["more", "next", "play", "prev", "queue"],
-          str(sorted(ctrl)))
-    boxes = {k: (b.x(), b.y(), b.width(), b.height()) for k, b in ctrl.items()}
+    ctrl = page.ctrl
+    win = zapp.window
+    # --- five transport buttons in the page's app bar, inside the window ------
+    check("five controls", sorted(ctrl) == ["more", "next", "play", "prev", "queue"], str(sorted(ctrl)))
+    from PySide6.QtCore import QPoint
+    boxes = {}
+    for k, bt in ctrl.items():
+        tl = bt.mapTo(win, QPoint(0, 0))
+        boxes[k] = (tl.x(), tl.y(), bt.width(), bt.height())
     for k, (x, y, w, h) in boxes.items():
-        inside = w >= 44 and h >= 44 and x >= UX0 and x + w <= UX0 + UW and y >= UY0 and y + h <= UY0 + UH
-        check(f"ctrl {k} >= 44px and inside usable area", inside, str((x, y, w, h)))
+        check(f"ctrl {k} >= 44px and inside window", w >= 44 and h >= 44 and x >= 0 and x + w <= 360
+              and y >= 0 and y + h <= 640, str((x, y, w, h)))
     xs = sorted((x, x + w) for x, y, w, h in boxes.values())
-    overlap = any(xs[i][1] > xs[i + 1][0] for i in range(len(xs) - 1))
-    check("controls do not overlap", not overlap, str(xs))
-    centers = {k: y + h / 2 for k, (x, y, w, h) in boxes.items()}
-    check("controls one row (centers aligned within 8px)",
-          max(centers.values()) - min(centers.values()) <= 8, str(centers))
-    check("controls are the SDK standard RoundButton size (68x52)",
-          all(w == 68 and h == 52 for x, y, w, h in boxes.values()), str(boxes))
-    # no volume slider
-    check("no volume slider", not any("volume" in (o.objectName() or "").lower()
-                                      for o in page.findChildren(QWidget))
-          and not hasattr(page, "_vol"))
-    # seek + big centered cover inside the usable area
-    s = view._seek
-    check("seek inside usable area", s.x() >= UX0 and s.x() + s.width() <= UX0 + UW
-          and s.y() >= UY0 and s.y() + s.height() <= UY0 + UH,
-          str((s.x(), s.y(), s.width(), s.height())))
-    c = view._cover
-    check("cover big+centered, inside usable area",
-          c.width() >= 280 and abs((c.x() + c.width() / 2) - UW / 2) <= 2
-          and c.x() >= UX0 and c.y() >= UY0 and c.y() + c.height() <= UY0 + UH,
-          str((c.x(), c.y(), c.width(), c.height())))
+    check("controls do not overlap", not any(xs[i][1] > xs[i + 1][0] for i in range(len(xs) - 1)), str(xs))
+    centers = [y + h / 2 for x, y, w, h in boxes.values()]
+    check("controls one row", max(centers) - min(centers) <= 8, str(centers))
+    check("controls are the SDK RoundButton size (68x52)", all(w == 68 and h == 52 for x, y, w, h in boxes.values()))
+    check("controls are CircleButton (no square overlay)",
+          all(type(bt).__name__ == "CircleButton" for bt in ctrl.values()))
+    check("no volume slider", not any("volume" in (o.objectName() or "").lower() for o in page.findChildren(QWidget)))
+    # --- SDK SeekBar, cover centered, texts ------------------------------------
+    check("seek is the SDK's ztos.SeekBar", isinstance(page._seek, ztos.SeekBar))
+    c = page._cover
+    ctl = c.mapTo(win, QPoint(0, 0))
+    check("cover big+centered inside window", c.width() >= 240 and abs(ctl.x() + c.width() / 2 - 180) <= 2
+          and ctl.y() >= 0 and ctl.y() + c.height() <= 640, str((ctl.x(), ctl.y(), c.width())))
+    page.set_track(b.now_playing())
+    check("title 24 / artist 14 labels filled", page._title.text() == "Fixture Song One"
+          and "Fixture Artist A" in page._artist.text(), f"{page._title.text()!r} {page._artist.text()!r}")
 
-    # --- options menu ---------------------------------------------------------
-    track = b.now_playing()
-    menu = player.OptionsMenu(zapp.window, track)
-    menu.show()
-    pump(app, 0.3)
-    check("menu inside window", 0 <= menu.x() and menu.x() + menu.width() <= 360
-          and 0 <= menu.y() and menu.y() + menu.height() <= 640,
-          str((menu.x(), menu.y(), menu.width(), menu.height())))
-    labels = [it[1] for it in menu._items]
+    # --- options: the SDK's standard menu ---------------------------------------
+    captured = []
+    orig_menu = ztos.menu
+    ztos.menu = lambda anchor, items: captured.append(items)
+    page._open_options()
+    ztos.menu = orig_menu
+    items = captured[0]
+    labels = [l for l, _cb in items]
     check("menu has favorites/go-album/go-artist/shuffle/repeat",
-          any("preferiti" in l for l in labels) and any("album" in l for l in labels)
-          and any("artista" in l for l in labels) and "shuffle" in labels and "repeat" in labels,
-          str(labels))
-    check("menu has NO Scarica and NO Condividi", not any("carica" in l.lower() or "condividi" in l.lower() for l in labels),
-          str(labels))
-    check("menu rows >= 48px", player.OptionsMenu.ROW_H >= 48 and len(menu._items) * player.OptionsMenu.ROW_H + 20 <= menu.height() + 1)
-    # favorite command goes on the wire
-    fav_item = next(it for it in menu._items if "preferiti" in it[1])
-    fav_item[3]()
+          any("favorites" in l for l in labels) and any("album" in l for l in labels)
+          and any("artist" in l for l in labels) and any(l.startswith("shuffle") for l in labels)
+          and any(l.startswith("repeat") for l in labels), str(labels))
+    check("menu has NO download / share", not any("download" in l.lower() or "share" in l.lower() for l in labels))
+    next(cb for l, cb in items if "favorites" in l)()
     pump(app, 0.6)
     reqs = [json.loads(l) for l in open(log)] if os.path.exists(log) else []
     check("favorite -> write req on the wire", any(r.get("req") == "write" and r.get("action") in ("favorite", "unfavorite") for r in reqs))
-    # vai all'album -> browse albums (cached) then open
-    go_album = next(it for it in menu._items if "album" in it[1])
     b.browse("albums")                      # fill the cache the menu searches
     pump(app, 0.3)
-    go_album[3]()
-    pump(app, 2.5)                          # push turnstile + shown() -> open req
+    next(cb for l, cb in items if "album" in l)()
+    pump(app, 2.5)
     reqs = [json.loads(l) for l in open(log)] if os.path.exists(log) else []
-    check("vai all'album -> open req on the wire", any(r.get("req") == "open" and "album" in r.get("kind", "").lower() for r in reqs),
+    check("go to album -> open req on the wire", any(r.get("req") == "open" and "album" in r.get("kind", "").lower() for r in reqs),
           str([r for r in reqs if r.get("req") == "open"]))
+    # --- blur toggle: off = nothing computed, black page --------------------------
+    st = ztos.store("zunehd"); st["blur_bg"] = False; st.save()
+    page.apply_blur_setting()
+    check("blur OFF: no background image", page._bg is None and not player.blur_enabled())
+    st["blur_bg"] = True; st.save()
 
     srv.stop()
     try:

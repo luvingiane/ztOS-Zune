@@ -123,7 +123,11 @@ class ListPage(ztos.Page):
 
     def _maybe_extend(self):
         view_h = self.viewport.height() if self.viewport.height() > 1 else 500
-        if self._scroll + view_h * 2 > self._built * ROW_H and self._built < len(self._all_items):
+        if self._built >= len(self._all_items):
+            if self._extend_timer is not None:
+                self._extend_timer.stop()          # everything built: no more 150 ms wake-ups
+            return
+        if self._scroll + view_h * 2 > self._built * ROW_H:
             self._build_chunk()
             prewarm(self._all_items[self._built:self._built + 60], GRID_ART)
 

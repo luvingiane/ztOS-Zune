@@ -1,474 +1,179 @@
-"""Now Playing, rifatta dietro lo screenshot di riferimento del proprietario
-(docs/shots/40-ref-nowplaying.png — osservato da: screenshot del proprietario
-del 7/11, vedi PROVENANCE.md; no codice della demo letto/copiato).
+"""Now Playing, built the ztmetro way (same parts as the official `music` app,
+ztOS/apps/music/player_view.py): a standard `ztos.Page` with its header, the
+cover, title (24) / artist (14, grey), the SDK's own `ztos.SeekBar`, and the
+five transport buttons in the page's app bar (queue, prev, play/pause, next,
+options) - no absolute layout, no safe-area arithmetic (the shell sizes the
+window between its status and nav bars).
 
-Layout (360x640 logici, misurati sul riferimento):
-- sfondo: gradiente scuro dai colori della copertina + parola gigante quasi
-  trasparente (titolo del brano, ~180px light, alpha 0.10) — niente blur,
-  niente texture a schermo intero (budget perf fase 3)
-- copertina piccola 105x105 in alto a sinistra (16,22) con ombra semplice
-- a destra: titolo in maiuscolo piccolo, album in grigio chiaro, artista in
-  grande sottile (come nel riferimento)
-- barra di avanzamento sottile con pallino bianco, tempo trascorso a sinistra
-  e rimanente con il meno a destra ("-2:51")
-- UNA riga di cinque controlli: coda, precedente, play/pausa (il più grande),
-  successivo, opzioni — niente volume (tasti fisici), niente altro
-- il menu Opzioni (stile pannello scuro ztOS, righe >= 48px, icona+testo+
-  sottotesto) apre: preferiti, vai all'album, vai all'artista, shuffle,
-  repeat. Le voci non fattibili (scarica, condividi, stazione, ecc.) sono
-  documentate in PLAYER-OPTIONS.md e NON compaiono (niente voci finte).
+Extras kept from the earlier player:
+- blurred cover as page background, OPTIONAL (Settings -> "player blur",
+  store key `blur_bg`, default on). Computed once per track on a worker thread
+  (never on the GUI thread): a cheap double downscale + one smooth upscale.
+- monotonic position model: slipmatd publishes a snapshot every 500 ms
+  (serve.rs:39), the bar interpolates in between and never goes backward on a
+  late snapshot; a position-only snapshot touches nothing but the bar.
+- the options are the SDK's standard menu (`ztos.menu`).
 """
 import time
 
 import ztos
 import icons
-from PySide6.QtCore import QPointF, QRectF, Qt, QTimer
-from PySide6.QtGui import QColor, QFont, QFontMetricsF, QImage, QLinearGradient, QPainter, QPainterPath, QPen
-from PySide6.QtWidgets import QWidget
+from PySide6.QtCore import QRectF, Qt, QThread, QTimer, Signal
+from PySide6.QtGui import QColor, QFontMetricsF, QLinearGradient, QPainter
+from PySide6.QtWidgets import QLabel, QWidget
 
 from art import Artwork, local_art, image_for
 from client import backend, rtitle
-from widgets import draw_cover, cover_colors, fmt_ms, CircleButton
+from widgets import CircleButton, cover_colors
 
-COVER = 105
-COVER_X, COVER_Y = 16, 22
-TEXT_X = COVER_X + COVER + 14          # 135
-SEEK_Y = 505
-CTRL_Y = 568
+COVER_MAX = 260
 
 
-class PlayerSeek(QWidget):
-    """Thin seek bar: white dot on a 3px track, elapsed left, '-remaining' right."""
+def blur_enabled() -> bool:
+    return bool(ztos.store("zunehd").get("blur_bg", True))
 
-    def __init__(self, on_seek=None):
-        super().__init__()
-        self.setFixedHeight(36)
-        self._pos, self._dur = 0.0, 0.0
-        self._seeking = False
-        self._scrub = 0.0
-        self._on_seek = on_seek
-        # robust position model: anchor = (position, monotonic receive time);
-        # while playing the displayed position interpolates monotonically and
-        # NEVER goes backward; a snapshot that arrives late/stale (lower than
-        # displayed) is accepted only after an explicit seek, a track change
-        # or pause; redraws are skipped when the difference is < 150 ms.
-        self._anchor_pos = 0.0      # seconds
-        self._anchor_t = 0.0        # time.monotonic() of the anchor
-        self._playing = False
-        self._track_key = ""
-        self._last_drawn = -1.0
 
-    def set_times(self, pos_ms, dur_ms):
-        """Backward-compatible raw setter (used by tests/explicit seek)."""
-        self._anchor_pos = pos_ms / 1000.0
-        self._anchor_t = time.monotonic()
-        self._dur = dur_ms / 1000.0
-        self._last_drawn = -1.0
-        if not self._seeking:
-            self.update()
+def make_blur_bg(img, w: int, h: int):
+    """Blurred background in a few ms: downscale the cover twice (32 px then
+    12 px, smooth = area averaging) and upscale once, smooth, to the window.
+    Pure Qt image ops, no Python pixel loops; safe on a worker thread."""
+    if img is None or img.isNull():
+        return None
+    small = img.scaled(32, 32, Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
+    small = small.scaled(12, 12, Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
+    return small.scaled(max(1, w), max(1, h), Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
 
-    def anchor(self, pos_ms, dur_ms, playing, track_key=""):
-        """Anchor to a daemon snapshot, with staleness guard."""
-        import time as _t
-        now_pos = self.current_pos()
-        new_pos = pos_ms / 1000.0
-        track_changed = track_key != self._track_key
-        self._track_key = track_key
-        self._dur = dur_ms / 1000.0
-        self._playing = bool(playing)
-        if not self._seeking:
-            backward = new_pos < now_pos - 0.150
-            if backward and not track_changed and playing and self._playing:
-                pass                      # stale/out-of-order snapshot: ignore
-            else:
-                self._anchor_pos = new_pos
-                self._anchor_t = _t.monotonic()
-                if abs(new_pos - self._last_drawn) >= 0.150:
-                    self._last_drawn = new_pos
-                    self.update()
 
-    def current_pos(self):
-        import time as _t
-        pos = self._anchor_pos
-        if self._playing and not self._seeking:
-            pos = min(self._dur if self._dur > 0 else pos,
-                      pos + (_t.monotonic() - self._anchor_t))
-        return pos
+class _BlurWorker(QThread):
+    done = Signal(str, object)
 
-    def _frac(self):
-        return 0.0 if self._dur <= 0 else min(1.0, (self._scrub if self._seeking else self.current_pos()) / self._dur)
+    def __init__(self, key, img, w, h, parent=None):
+        super().__init__(parent)
+        self._key, self._img, self._w, self._h = key, img.copy(), w, h
+
+    def run(self):
+        self.done.emit(self._key, make_blur_bg(self._img, self._w, self._h))
+
+
+class PositionModel:
+    """Anchor = (position, monotonic time of the snapshot). While playing the
+    position interpolates; a snapshot lower than the interpolated position
+    (late / out of order) is ignored unless the track changed, playback
+    paused or the user sought."""
+
+    def __init__(self):
+        self.pos = 0.0
+        self.t = 0.0
+        self.dur = 0.0
+        self.playing = False
+        self.key = ""
+
+    def anchor(self, pos_ms, dur_ms, playing, key=""):
+        now_pos = self.current()
+        new = pos_ms / 1000.0
+        changed = key != self.key
+        self.key = key
+        self.dur = dur_ms / 1000.0
+        was_playing = self.playing
+        self.playing = bool(playing)
+        if new < now_pos - 0.150 and not changed and playing and was_playing:
+            return False                         # stale snapshot: ignore
+        self.pos, self.t = new, time.monotonic()
+        return True
+
+    def seek_to(self, seconds):
+        self.pos, self.t = seconds, time.monotonic()
+
+    def current(self):
+        if self.playing:
+            return min(self.dur if self.dur > 0 else self.pos, self.pos + (time.monotonic() - self.t))
+        return self.pos
+
+
+class _Backdrop(QWidget):
+    """Child of the page's viewport, under the body: paints the page-wide
+    background (blurred cover / gradient) offset so it lines up with the page."""
+
+    def __init__(self, page, viewport):
+        super().__init__(viewport)
+        self._page = page
+        self.setGeometry(0, 0, 4000, 4000)        # clipped by the viewport
+        self.setAttribute(Qt.WA_TransparentForMouseEvents)
+        self.lower()
 
     def paintEvent(self, event):
         p = QPainter(self)
-        p.setRenderHints(QPainter.Antialiasing | QPainter.TextAntialiasing)
-        w = float(self.width())
-        y = 6.0
-        f = self._frac()
-        p.fillRect(QRectF(0, y, w, 3), QColor(255, 255, 255, 60))
-        p.fillRect(QRectF(0, y, w * f, 3), QColor("white"))
-        p.setBrush(ztos.accent())                  # accent dot, ztSettings color
-        p.setPen(Qt.NoPen)
-        p.drawEllipse(QPointF(w * f, y + 1.5), 5.5, 5.5)
-        p.setPen(QColor(255, 255, 255, 170))
-        p.setFont(ztos._font(ztos.FONT_REGULAR, 13))
-        fm = QFontMetricsF(p.font())
-        cur = self._scrub if self._seeking else self.current_pos()
-        elapsed = fmt_ms(cur * 1000)
-        remaining = fmt_ms(max(0.0, self._dur - cur) * 1000)
-        p.drawText(QPointF(0, 30), elapsed)
-        p.drawText(QPointF(w - fm.horizontalAdvance("-" + remaining), 30), "-" + remaining)
-
-    def mousePressEvent(self, event):
-        self._seeking = True
-        self._scrub = self._x(event.position().x())
-        ztos.haptic("tick")
-        self.update()
-
-    def mouseMoveEvent(self, event):
-        if self._seeking:
-            self._scrub = self._x(event.position().x())
-            self.update()
-
-    def mouseReleaseEvent(self, event):
-        if self._seeking:
-            self._seeking = False
-            self._anchor_pos = self._scrub
-            self._anchor_t = time.monotonic()
-            self._last_drawn = self._scrub
-            ztos.haptic("tap")
-            if self._on_seek:
-                self._on_seek(self._scrub)
-            self.update()
-
-    def _x(self, x):
-        return 0.0 if self._dur <= 0 else max(0.0, min(1.0, x / max(1.0, self.width()))) * self._dur
+        p.translate(0, -self._page.viewport.y())
+        self._page.paint_backdrop(p)
 
 
-def make_blur_bg(img, w: int, h: int, small_w: int = 120, passes: int = 3):
-    """Real blur at low cost, computed ONCE per track: downscale to ~120 px
-    wide (smooth), 3 box-blur passes over the bytes of the small image, then a
-    single bilinear upscale to the window. No per-frame blur, no full-screen
-    texture upload beyond the static result."""
-    import time as _t
-    t0 = _t.perf_counter()
-    small = img.scaled(small_w, max(1, int(small_w * img.height() / max(1, img.width()))),
-                       Qt.KeepAspectRatio, Qt.SmoothTransformation)
-    small = small.convertToFormat(QImage.Format_RGB32)
-    sw, sh = small.width(), small.height()
-    buf = small.bits()
-    n = sw * sh * 4
-    data = bytearray(buf[:n])
-    r = 6
-    for _ in range(passes):
-        # horizontal
-        out = bytearray(n)
-        for y in range(sh):
-            row = y * sw * 4
-            acc = [0, 0, 0, 0]
-            for x in range(-r, r + 1):
-                i = row + max(0, min(sw - 1, x)) * 4
-                for c in range(4):
-                    acc[c] += data[i + c]
-            cnt = 2 * r + 1
-            for x in range(sw):
-                i = row + x * 4
-                for c in range(4):
-                    out[i + c] = acc[c] // cnt
-                xi = row + max(0, min(sw - 1, x + r + 1)) * 4
-                xj = row + max(0, min(sw - 1, x - r)) * 4
-                for c in range(4):
-                    acc[c] += data[xi + c] - data[xj + c]
-        data = out
-        # vertical
-        out = bytearray(n)
-        for x in range(sw):
-            acc = [0, 0, 0, 0]
-            for y in range(-r, r + 1):
-                i = (max(0, min(sh - 1, y)) * sw + x) * 4
-                for c in range(4):
-                    acc[c] += data[i + c]
-            cnt = 2 * r + 1
-            for y in range(sh):
-                i = (y * sw + x) * 4
-                for c in range(4):
-                    out[i + c] = acc[c] // cnt
-                yi = (max(0, min(sh - 1, y + r + 1)) * sw + x) * 4
-                yj = (max(0, min(sh - 1, y - r)) * sw + x) * 4
-                for c in range(4):
-                    acc[c] += data[yi + c] - data[yj + c]
-        data = out
-    small2 = QImage(data, sw, sh, QImage.Format_RGB32)
-    bg = small2.scaled(w, h, Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
-    print(f"zunehd blur-bg: {small_w}px + {passes} box passes + upscale in {(_t.perf_counter()-t0)*1000:.1f} ms",
-          file=__import__("sys").stderr, flush=True)
-    return bg
-
-
-# ztOS shell chrome over the app window (ztmetro/ztmetro.c:128-131):
-# STATUS_H = 28 top, NAV_BAR_H = 40 bottom. The player must fit inside this.
-TOP_INSET = 28
-BOTTOM_INSET = 40
-
-
-class PlayerView(ztos.Entry):
-    """Now Playing in metro key (owner: inspired by the original Slipmat
-    client with the wrapper theme, NOT a copy of the Zune demo screenshot):
-    big centered cover with a small shadow, blurred cover as background
-    (computed once per track: cover downscaled to 24x42, then upscaled to the
-    window — one small static image, no per-frame blur, no full-screen texture),
-    title thin + artist — album grey with ellipsis, one thin seek bar with an
-    accent dot (elapsed left, -remaining right), no volume, and the five
-    controls `queue prev play/pause next options` fully inside the usable area
-    (window minus status bar and nav bar)."""
+class NowPlaying(ztos.Page):
+    """The Now Playing page. Back pops it. It never scrolls."""
 
     def __init__(self, app):
-        super().__init__("", "")
+        super().__init__("now playing", scroll=False)
         self._app = app
+        self.view = self                       # compat: old code reached page.view
         self._track = {}
         self._track_key = ""
-        self._bg_full = None           # blurred full-screen bg, computed once per track
-        # controls: coda, prev, play/pausa, next, opzioni — the SDK's own
-        # RoundButtons with bundled GTK svg glyphs (standard 68x52, the SDK
-        # renders the svg 22x22 in its 44px ring)
+        self._model = PositionModel()
+        self._bg = None                        # blurred background (window size)
+        self._bg_key = None
+        self._worker = None
+        self._blur_applied = blur_enabled()
+        # the page background is ours to paint (blur): viewport/body transparent
+        # (the SDK viewport paints opaque black: our backdrop is a child under the body)
+        self.body.setStyleSheet("background: transparent;")
+        self._backdrop = _Backdrop(self, self.viewport)
+        self.list.setContentsMargins(ztos.MARGIN, 8, ztos.MARGIN, 8)
+
+        self._cover = Artwork(COVER_MAX, "", "", art_size=512)
+        self.list.insertWidget(self.list.count() - 1, self._cover, 0, Qt.AlignHCenter)
+        self.space(14)
+        self._title = self._label(24, ztos.FONT_LIGHT, "white")
+        self._artist = self._label(14, ztos.FONT_REGULAR, "rgba(255,255,255,150)")
+        self.space(10)
+        self._seek = self.add(ztos.SeekBar(0.0, 0.0, on_seek=self._on_seek))
+
         self.ctrl = {}
         for kind, cb in (("queue", lambda: app.push(_queue_page())),
                          ("prev", lambda: backend.transport("previous")),
                          ("play", lambda: backend.transport("playPause")),
                          ("next", lambda: backend.transport("next")),
                          ("more", self._open_options)):
-            b = CircleButton(icons.path(kind), on_tap=cb)
-            b.setParent(self)
-            self.ctrl[kind] = b
-        self._seek = PlayerSeek(on_seek=lambda s: backend.seek(s * 1000.0))
-        self._seek.setParent(self)
-        self._cover = Artwork(300, "", "", art_size=512)
-        self._cover.setParent(self)
-        self._options = None
-        self._clock = QTimer(self, interval=1000)
+            self.ctrl[kind] = CircleButton(icons.path(kind), on_tap=cb)
+        bar = self.bar(*self.ctrl.values())
+        # the SDK bar has 16 px margins: 5 buttons of 68 px (340) do not fit 360.
+        # Configuring OUR instance's layout (the SDK is untouched).
+        bar.layout().setContentsMargins(8, 2, 8, 4)
+        bar.layout().setSpacing(0)
+
+        self._clock = QTimer(self, interval=500)
         self._clock.timeout.connect(self._tick)
         self._clock.start()
-        self._layout()
-
-    def _usable(self):
-        win = self.window()
-        w = win.width() if win.width() > 1 else self.width()
-        h = win.height() if win.height() > 1 else self.height()
-        return w, h, TOP_INSET, max(0, h - TOP_INSET - BOTTOM_INSET)
-
-    def _layout(self):
-        w, h, top, usable_h = self._usable()
-        self.setFixedSize(w, h)
-        cover = min(w - 40, 300)
-        cx = (w - cover) // 2
-        cy = top + 16
-        self._cover.setFixedSize(cover, cover)
-        self._cover.move(cx, cy)
-        self._cover.show()
-        # controls row: the five SDK RoundButtons (68x52 each) centered,
-        # bottom edge inside the usable area
-        sizes = {k: b.width() for k, b in self.ctrl.items()}
-        row_h = max(sizes.values())
-        row_y = top + usable_h - 10 - row_h
-        total = sum(sizes.values())
-        gap = max(0.0, (w - 20.0 - total) / 4.0)
-        x = (w - (total + 4.0 * gap)) / 2.0
-        for kind in ("queue", "prev", "play", "next", "more"):
-            b = self.ctrl[kind]
-            b.move(int(round(x)), int(row_y + (row_h - sizes[kind]) / 2))
-            b.show()
-            x += sizes[kind] + gap
-        # seek above the controls
-        seek_h = 36
-        self._seek.setGeometry(16, int(row_y - 14 - seek_h), w - 32, seek_h)
-        self._seek.show()
-        self._cover_y = cy
-        self._cover_size = cover
-
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
-        self._layout()
-
-    # ---- content -------------------------------------------------------------
-    def set_track(self, t: dict):
-        # slipmatd publishes a snapshot every 500 ms while playing
-        # (serve.rs:39 TICK_MS=500): a position-only snapshot must NOT
-        # invalidate the page cache (that saturated the GUI thread on B and
-        # made the seek bar jump every ~2 s). Only a real track change
-        # redraws the page; position/playing only touch the seek bar and the
-        # play glyph.
-        key = f"{t.get('title', '')}|{t.get('artist', '')}|{t.get('track_id', '')}|{t.get('art_path', '')}"
-        metadata_changed = key != self._track_key
-        self._track = t
-        self._track_key = key
-        if metadata_changed:
-            title = t.get("title", "")
-            self._cover.set_template(t.get("artwork_template", ""), t.get("album") or title)
-            art = t.get("art_path", "")
-            p = local_art(art, 512) if art else None
-            if p and image_for(p) is not None:
-                self._cover._img = image_for(p)
-            self._bg_full = None            # recompute the blurred background once per track
-            self.ctrl["play"].set_glyph(icons.path("pause" if t.get("playing") else "play"))
-            self.redraw()
-            self.content_changed()
-        self._seek.anchor(t.get("position_ms", 0), t.get("duration_ms", 0),
-                          t.get("playing", False), track_key=key)
-        if not metadata_changed:
-            play = self.ctrl["play"]
-            glyph = icons.path("pause" if t.get("playing") else "play")
-            if play._glyph != glyph:
-                play.set_glyph(glyph)
-
-    def _tick(self):
-        # just repaint the seek bar; the position itself is the anchored,
-        # monotonic interpolation in PlayerSeek.current_pos()
-        if self._track.get("playing") and self._seek.isVisible():
-            self._seek.update()
-
-    def _open_options(self):
-        host = self.window()
-        self._options = OptionsMenu(host, self._track)
-        self._options.show()
-        self._options.raise_()
-
-    # ---- drawing -------------------------------------------------------------
-    def _background(self, p: QPainter, w: float, h: float):
-        img = self._cover._img
-        if img is not None and not img.isNull():
-            if self._bg_full is None:
-                self._bg_full = make_blur_bg(img, int(w), int(h))   # once per track
-            p.setRenderHint(QPainter.SmoothPixmapTransform, True)
-            p.drawImage(QRectF(0, 0, w, h), self._bg_full)
-            p.fillRect(QRectF(0, 0, w, h), QColor(0, 0, 0, 165))   # dark veil for legibility
-        else:
-            c1, c2 = cover_colors(self._track.get("album") or self._track.get("title") or "")
-            g = QLinearGradient(0, 0, w, h)
-            g.setColorAt(0.0, QColor(c2).darker(200))
-            g.setColorAt(1.0, QColor(0, 0, 0))
-            p.fillRect(QRectF(0, 0, w, h), g)
-
-    def draw(self, p: QPainter):
-        w, h = float(self.width()), float(self.height())
-        self._background(p, w, h)
-        # cover shadow (one offset rect) — the cover itself is a child widget
-        cs, cx, cy = self._cover_size, self._cover.x(), self._cover.y()
-        p.fillRect(QRectF(cx + 6, cy + 8, cs, cs), QColor(0, 0, 0, 130))
-        # texts centered under the cover, one line each with ellipsis
-        ty = cy + cs + 18
-        p.setPen(QColor("white"))
-        p.setFont(ztos._font(ztos.FONT_LIGHT, 30))
-        fm = QFontMetricsF(p.font())
-        p.drawText(QRectF(16, ty, w - 32, 40), Qt.AlignHCenter,
-                   fm.elidedText(self._track.get("title", ""), Qt.ElideRight, w - 32))
-        p.setPen(QColor(255, 255, 255, 170))
-        p.setFont(ztos._font(ztos.FONT_REGULAR, 16))
-        fm2 = QFontMetricsF(p.font())
-        sub = f"{self._track.get('artist', '')} — {self._track.get('album', '')}".strip(" —")
-        p.drawText(QRectF(16, ty + 42, w - 32, 24), Qt.AlignHCenter,
-                   fm2.elidedText(sub, Qt.ElideRight, w - 32))
-
-
-class OptionsMenu(ztos.Entry):
-    """The options menu: dark ztOS-style panel over the window, rows >= 48px,
-    icon + label + optional sublabel. Only real, working entries."""
-
-    ROW_H = 52
-
-    def __init__(self, host, track: dict):
-        super().__init__("", "")
-        self._host = host
-        self._track = track
-        t = backend.now_playing()
-        items = self._items(t)
-        h = 12 + len(items) * self.ROW_H + 8
-        self.setParent(host)
-        self.setFixedHeight(h)                    # Entry fixes 45px otherwise
-        bottom = host.height() - BOTTOM_INSET - 8
-        self.setGeometry(20, max(20, bottom - h), host.width() - 40, h)
-        self._items = items
-        self._row_hit = [self.ROW_H] * len(items)
-
-    def _items(self, t):
-        sid = self._song_id(t)
-        fav = bool(t.get("favorite"))
-        items = [
-            ("star", "Rimuovi dai preferiti" if fav else "Aggiungi ai preferiti", "",
-             lambda: backend.write("unfavorite" if fav else "favorite", sid)),
-            ("album", "Vai all'album", t.get("album", ""),
-             lambda: self._go("albums", t.get("album", ""), "album")),
-            ("artist", "Vai all'artista", t.get("artist", ""),
-             lambda: self._go("artists", t.get("artist", ""), "artist")),
-            ("shuffle", "shuffle", "on" if t.get("shuffle") else "off",
-             lambda: backend.set_shuffle(not t.get("shuffle"))),
-            ("repeat", "repeat", t.get("repeat", "none"),
-             lambda: backend.set_repeat(_next_repeat(t.get("repeat", "none")))),
-        ]
-        return items
-
-    def _song_id(self, t):
-        items, pos = backend.queue_items()
-        if items and 0 <= pos < len(items):
-            return items[pos].get("id") or ""
-        return (self._track.get("track_id") or "")
-
-    def _go(self, view, name, kind):
-        for row in backend.browse(view):
-            if rtitle(row) == name:
-                from hub import DetailPage
-                ztos.App.current.push(DetailPage(row.get("pageKind", kind), row.get("id", ""), rtitle(row)))
-                return
-
-    def draw(self, p: QPainter):
-        p.setRenderHints(QPainter.Antialiasing | QPainter.TextAntialiasing)
-        r = QRectF(0, 0, self.width(), self.height())
-        p.fillRect(r, QColor(24, 24, 24, 242))
-        p.setPen(QPen(QColor(255, 255, 255, 40), 1))
-        p.drawRect(r)
-        y = 12.0
-        for icon, label, sub, _cb in self._items:
-            p.save()
-            p.translate(26, y + self.ROW_H / 2.0)
-            icons.draw_glyph(p, icon, 22)
-            p.restore()
-            p.setPen(QColor("white"))
-            p.setFont(ztos._font(ztos.FONT_REGULAR, 16))
-            p.drawText(QPointF(44, y + 22), label)
-            if sub:
-                p.setPen(QColor(255, 255, 255, 140))
-                p.setFont(ztos._font(ztos.FONT_REGULAR, 12.5))
-                p.drawText(QPointF(44, y + 40), sub)
-            y += self.ROW_H
-
-    def mousePressEvent(self, event):
-        pass
-
-    def mouseReleaseEvent(self, event):
-        y = event.position().y() - 12.0
-        i = int(y // self.ROW_H)
-        self.close()
-        self.deleteLater()
-        if 0 <= i < len(self._items):
-            ztos.haptic("tap")
-            self._items[i][3]()
-
-
-def _next_repeat(cur):
-    order = ["none", "one", "all"]
-    return order[(order.index(cur) + 1) % len(order)] if cur in order else "all"
-
-
-class NowPlaying(ztos.Page):
-    """The Now Playing page: one PlayerView filling it. Back pops it.
-    The page must NOT scroll or rubber-band with the finger (content is exactly
-    the window height): drags and flings are no-ops here."""
-
-    def __init__(self, app):
-        super().__init__("", header=False, scroll=False)
-        self.list.setContentsMargins(0, 0, 0, 0)
-        self.view = PlayerView(app)
-        self.add(self.view)
         backend.snapshot_changed.connect(self._refresh)
 
+    # ---- building blocks -----------------------------------------------------
+    def _label(self, size, family, color):
+        lab = QLabel("")
+        lab.setFont(ztos._font(family, size))
+        lab.setStyleSheet(f"color: {color}; background: transparent;")
+        lab.setAlignment(Qt.AlignHCenter | Qt.AlignVCenter)
+        lab.setFixedHeight(int(size * 1.7))
+        self.add(lab)
+        return lab
+
+    @staticmethod
+    def _set_elided(label, text):
+        fm = QFontMetricsF(label.font())
+        w = max(60, (label.width() if label.width() > 60 else 328) - 4)
+        label.setText(fm.elidedText(text, Qt.ElideRight, w))
+
+    def _on_seek(self, seconds):
+        self._model.seek_to(seconds)
+        backend.seek(seconds * 1000.0)
+
+    # ---- page lifecycle -------------------------------------------------------
     def _drag_to(self, raw):
         pass                        # no vertical drag on the player
 
@@ -476,14 +181,124 @@ class NowPlaying(ztos.Page):
         pass
 
     def shown(self):
+        if blur_enabled() != self._blur_applied:        # toggled in Settings meanwhile
+            self.apply_blur_setting()
         self._refresh()
 
     def _refresh(self):
         if not self.isVisible():
-            return                      # snapshot arrives every second: skip when hidden
+            return                      # snapshots arrive every 500 ms: skip when hidden
         t = backend.now_playing()
         t["favorite"] = self._favorite_flag(t)
-        self.view.set_track(t)
+        self.set_track(t)
+
+    def set_track(self, t: dict):
+        """Snapshot in. A position-only snapshot touches only the seek model
+        and the play glyph; a real track change updates texts, cover, blur."""
+        key = f"{t.get('title', '')}|{t.get('artist', '')}|{t.get('track_id', '')}|{t.get('art_path', '')}"
+        changed = key != self._track_key
+        self._track = t
+        self._track_key = key
+        playing = bool(t.get("playing"))
+        glyph = icons.path("pause" if playing else "play")
+        play = self.ctrl["play"]
+        if play._glyph != glyph:
+            play.set_glyph(glyph)
+        if changed:
+            self._set_elided(self._title, t.get("title", ""))
+            sub = f"{t.get('artist', '')} - {t.get('album', '')}".strip(" -")
+            self._set_elided(self._artist, sub)
+            self._cover.set_template(t.get("artwork_template", ""), t.get("album") or t.get("title", ""))
+            art = t.get("art_path", "")
+            p = local_art(art, 512) if art else None
+            if p and image_for(p) is not None:
+                self._cover._img = image_for(p)
+                self._cover.redraw()
+            self._request_blur(key)
+        self._model.anchor(t.get("position_ms", 0), t.get("duration_ms", 0), playing, key)
+        self._seek.set_duration(self._model.dur)
+        self._seek.set_position(self._model.current())
+
+    def _tick(self):
+        # interpolate the bar between the 500 ms snapshots (repaints only it)
+        if self._model.playing and self._seek.isVisible():
+            self._seek.set_position(self._model.current())
+
+    # ---- blurred background (optional) ----------------------------------------
+    def _request_blur(self, key):
+        img = self._cover._img
+        if not blur_enabled() or img is None or img.isNull():
+            if self._bg is not None:
+                self._bg = None
+                self.update()
+            return
+        self._bg_key = key
+        w = self.window().width() if self.window().width() > 1 else self.width()
+        h = self.window().height() if self.window().height() > 1 else self.height()
+        self._worker = _BlurWorker(key, img, int(w), int(h), self)
+        self._worker.done.connect(self._blur_ready)
+        self._worker.start()
+
+    def _blur_ready(self, key, image):
+        if key == self._track_key and blur_enabled():
+            self._bg = image
+            self.update()
+            self._backdrop.update()
+
+    def apply_blur_setting(self):
+        """Settings toggled: take effect at once (no restart)."""
+        self._bg = None
+        self._blur_applied = blur_enabled()
+        self._request_blur(self._track_key)
+        self.update()
+        self._backdrop.update()
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        self.paint_backdrop(p)
+
+    def paint_backdrop(self, p):
+        w, h = float(self.width()), float(self.height())
+        p.fillRect(QRectF(0, 0, w, h), QColor("black"))
+        if not blur_enabled():
+            return
+        if self._bg is not None:
+            p.drawImage(QRectF(0, 0, w, h), self._bg)
+            p.fillRect(QRectF(0, 0, w, h), QColor(0, 0, 0, 170))     # veil: keep text legible
+        else:
+            c1, _c2 = cover_colors(self._track.get("album") or self._track.get("title") or "")
+            g = QLinearGradient(0, 0, 0, h)
+            g.setColorAt(0.0, QColor(c1).darker(320))
+            g.setColorAt(1.0, QColor(0, 0, 0))
+            p.fillRect(QRectF(0, 0, w, h), g)
+
+    # ---- options (the SDK's standard menu) --------------------------------------
+    def _open_options(self):
+        t = backend.now_playing()
+        fav = bool(self._track.get("favorite"))
+        sid = self._song_id()
+        items = [
+            ("remove from favorites" if fav else "add to favorites",
+             lambda: backend.write("unfavorite" if fav else "favorite", sid)),
+            (f"go to album: {t.get('album', '')}", lambda: self._go("albums", t.get("album", ""), "album")),
+            (f"go to artist: {t.get('artist', '')}", lambda: self._go("artists", t.get("artist", ""), "artist")),
+            (f"shuffle: {'on' if t.get('shuffle') else 'off'}", lambda: backend.set_shuffle(not t.get("shuffle"))),
+            (f"repeat: {t.get('repeat', 'none')}", lambda: backend.set_repeat(_next_repeat(t.get("repeat", "none")))),
+        ]
+        self._menu = ztos.menu(self.ctrl["more"], items)
+
+    def _song_id(self):
+        items, pos = backend.queue_items()
+        if items and 0 <= pos < len(items):
+            return items[pos].get("id") or ""
+        return self._track.get("track_id") or ""
+
+    def _go(self, view, name, kind):
+        for row in backend.browse(view):
+            if rtitle(row) == name:
+                from hub import DetailPage
+                ztos.App.current.push(DetailPage(row.get("pageKind", kind), row.get("id", ""), rtitle(row)))
+                return
 
     def _favorite_flag(self, t):
         """Favorite state of the current track, from the cached songs rows."""
@@ -494,6 +309,11 @@ class NowPlaying(ztos.Page):
                 if r.get("title") == t.get("title") and r.get("artist") == t.get("artist"):
                     return bool(r.get("favorite"))
         return False
+
+
+def _next_repeat(cur):
+    order = ["none", "one", "all"]
+    return order[(order.index(cur) + 1) % len(order)] if cur in order else "all"
 
 
 def _queue_page():

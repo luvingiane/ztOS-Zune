@@ -116,3 +116,22 @@ riproduzione ci si aspetta ora: `paints` ~2/s (solo la seek bar), `raster`
 `serve.rs:39`) invalidava tutta la pagina → repaint full-page a DPR 3 →
 barra visibile ogni ~2 s. Riporta: `paints/s` e `raster ms/s` sul player in
 play + `top -b -H -d 2 -n 5` sul thread python3.
+
+
+## 6. Matrice di misura "è davvero un cap di pipeline?" (stage 9)
+
+La frase "cap di pipeline ~29 fps" NON è provata per Zune HD (ztsettings è un
+client C, non Python/Qt: non è un confronto alla pari; `LOG.md` 1/11 parla di
+draw+finish ~40 ms/frame = costo per frame, non attesa DSI). Esperimento:
+
+- Voci di menu (riattivare i `.desktop` disabilitati, DEPLOY-B.md §8): stessa
+  app con `Exec=env ZUNE_PERF=1 ZUNE_PERFMODE=big ...` e con `normal`.
+  `ZUNE_PERFMODE=big|eco|normal` chiama `ztos.performance()` (zrnperfd):
+  `big` tiene aperti i big core all'app.
+- Scenari: scroll lista songs (15 s), push pagina (apri album 5 volte),
+  player in play 15 s. App: ref, Zune HD, `com.zerone.music` (SDK ufficiale).
+- Per ogni caso: righe `zune-perf` (fps, d_swap, draw_ms, raster ms/s),
+  `top -b -H -d 2 -n 5` (thread python3) e, in sola lettura,
+  `cat /sys/devices/system/cpu/cpu*/cpufreq/scaling_cur_freq`.
+- Lettura: d_swap ≈ 33 ms con draw ≈ 1 ms ⇒ attesa di presentazione; thread
+  python3 > 90 % o draw_ms alto ⇒ CPU-bound (cambia con `big`?).

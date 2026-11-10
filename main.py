@@ -78,4 +78,10 @@ if _nav:
             QTimer.singleShot(2500, _scroll)
     QTimer.singleShot(1500, _go)
 
+# A/B switch for the on-device perf matrix (PERF-ON-B.md): ZUNE_PERFMODE=big|eco|normal
+# asks the phone's power manager (zrnperfd, ztos.performance) how to treat this app.
+_pm = os.environ.get("ZUNE_PERFMODE")
+if _pm in ("big", "eco", "normal"):
+    print(f"zunehd: ztos.performance({_pm!r}) -> {ztos.performance(_pm)}", flush=True)
+
 app.run(music)
