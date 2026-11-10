@@ -23,6 +23,7 @@ from PySide6.QtGui import QColor, QFontMetricsF, QLinearGradient, QPainter
 from PySide6.QtWidgets import QLabel, QWidget
 
 from art import Artwork, local_art, image_for
+import art as art_mod
 from client import backend, rtitle
 from widgets import CircleButton, cover_colors
 
@@ -208,8 +209,9 @@ class NowPlaying(ztos.Page):
             self._set_elided(self._title, t.get("title", ""))
             sub = f"{t.get('artist', '')} - {t.get('album', '')}".strip(" -")
             self._set_elided(self._artist, sub)
-            self._cover.set_template(t.get("artwork_template", ""), t.get("album") or t.get("title", ""))
             art = t.get("art_path", "")
+            art_mod.allow(t.get("artwork_template"), art)       # exempt from ZUNE_NOIMG
+            self._cover.set_template(t.get("artwork_template", ""), t.get("album") or t.get("title", ""))
             p = local_art(art, 512) if art else None
             if p and image_for(p) is not None:
                 self._cover._img = image_for(p)

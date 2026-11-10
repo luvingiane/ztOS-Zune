@@ -60,7 +60,21 @@ def main():
     art.NOIMG = True
     if art.local_art(os.path.join(REPO, "icon.png")) is not None:
         fails.append("NOIMG: local_art still returns files")
+    art.allow(os.path.join(REPO, "icon.png"))
+    if art.local_art(os.path.join(REPO, "icon.png")) is None:
+        fails.append("NOIMG: allowed artwork (playlist/now playing) is blocked")
+    f2 = art._Fetcher()
+    for th in f2._threads:
+        th.isRunning = lambda: True
+    f2.add("http://x.invalid/blocked/{w}x{h}bb.jpg", 300)
+    if f2._queue:
+        fails.append("NOIMG: a blocked template got queued for download")
+    art.allow("http://x.invalid/ok/{w}x{h}bb.jpg")
+    f2.add("http://x.invalid/ok/{w}x{h}bb.jpg", 300)
+    if len(f2._queue) != 1:
+        fails.append("NOIMG: allowed template not queued")
     art.NOIMG = False
+    art.ALLOW.clear()
     if art.local_art(os.path.join(REPO, "icon.png")) is None:
         fails.append("local_art broken without NOIMG")
     print("ALL PASS" if not fails else "FAILED: " + "; ".join(fails))

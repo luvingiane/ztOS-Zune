@@ -30,6 +30,9 @@ def cover_colors(text: str):
 
 
 def draw_cover(p: QPainter, rect: QRectF, title: str):
+    if art_mod.NOIMG:                       # perf experiment: flat grey, no gradient
+        p.fillRect(rect, QColor(38, 38, 38))
+        return
     c1, c2 = cover_colors(title)
     g = QLinearGradient(rect.topLeft(), rect.bottomRight())
     g.setColorAt(0.0, c1)

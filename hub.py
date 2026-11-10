@@ -113,6 +113,9 @@ class ListPage(ztos.Page):
             self.add(Notice(backend.demo_notice or "demo data"))
         elif not rows:
             self.add(Notice(f"error: {backend.last_error}" if backend.last_error else "empty"))
+        if self.view == "playlists":              # exempt from ZUNE_NOIMG
+            import art as _a
+            _a.allow(*[r.get("artworkTemplate") for r in rows])
         self._all_items = rows
         self._items = rows            # all items (SongsPage plays from this list)
         self._built = 0
@@ -463,6 +466,9 @@ class DetailPage(ztos.Page):
         if "artist" in (self._kind or "").lower():
             self._artist_page(header, entries)
             return
+        if "playlist" in (self._kind or ""):
+            import art as _art
+            _art.allow(header.get("artworkTemplate"), *[e.get("artworkTemplate") for e in entries[:4]])
         if "playlist" in (self._kind or "") and not header.get("artworkTemplate") and entries:
             import art as _art
             paths = [_art.local_art(e.get("artworkTemplate", ""), 300) for e in entries[:4]]
