@@ -10,55 +10,89 @@ refresh, quit daemon, about.
 """
 import ztos
 import icons
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import QPointF, QRectF, Qt, QTimer, Signal
+from PySide6.QtGui import QColor, QPainter
+from PySide6.QtWidgets import QAbstractSlider
 
-from client import backend, rtitle
-from widgets import Row
+from client import backend, rtitle, unplayable_ids, is_available
+from widgets import Row, CircleButton, ROW_H
+
+
+GRIP_W = 44
+
+
+class Grip(QAbstractSlider):
+    """Drag handle at the right of a queue row. It subclasses QAbstractSlider
+    on purpose: the SDK's finger filter (`_Finger._down`) treats sliders as
+    `passive` — it neither scrolls the page nor takes the touch over — so the
+    handle receives press/move/release as they are, with no long-press and no
+    poking at SDK internals. Emits the GLOBAL y of the finger."""
+
+    grabbed = Signal(float)
+    dragged = Signal(float)
+    dropped = Signal(float)
+
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.setFixedSize(GRIP_W, ROW_H)
+        self._down = False
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor(255, 255, 255, 200 if self._down else 120))
+        cx, cy = self.width() / 2.0, self.height() / 2.0
+        for dy in (-7, 0, 7):                    # three bars: the usual "reorder" handle
+            p.drawRoundedRect(QRectF(cx - 9, cy + dy - 1.5, 18, 3), 1.5, 1.5)
+
+    def mousePressEvent(self, event):
+        self._down = True
+        self.update()
+        self.grabbed.emit(event.globalPosition().y())
+        event.accept()
+
+    def mouseMoveEvent(self, event):
+        if self._down:
+            self.dragged.emit(event.globalPosition().y())
+        event.accept()
+
+    def mouseReleaseEvent(self, event):
+        if self._down:
+            self._down = False
+            self.update()
+            self.dropped.emit(event.globalPosition().y())
+        event.accept()
 
 
 class QueuePage(ztos.Page):
     """The queue. Rebuilt only when the CONTENT changes (signature of
-    id+title), never on position-only events — a queue event storm used to
-    freeze the page. Rows are TEXT ONLY (the Zune queue shows no artwork:
-    74 async thumb fetches also used to keep the page's GL picture dirty
-    while they arrived). Rows: tap = jumpTo, hold = remove, long-press +
-    drag = reorder (moveInQueue, ipc.rs:236-238)."""
+    id+title), never on position-only events. Rows are TEXT ONLY. Tap =
+    jumpTo, hold = menu (remove), drag the handle on the right = reorder
+    (moveInQueue, ipc.rs:236-238): the row is lifted and the others make room
+    live, the page scrolls itself near its edges."""
+
+    EDGE = 56          # px from the viewport edge where auto-scroll starts
 
     def __init__(self):
         super().__init__("queue")
         self.list.setContentsMargins(17, 0, 16, 24)
-        self.bar(ztos.RoundButton(icons.path("clear"), "clear", self._clear))
+        self.bar(CircleButton(icons.path("clear"), "clear", self._clear))
         self._sig = None
         self._row_widgets = []
+        self._drag_row = None
         self._drag_from = None
-        self._drag_over = None
+        self._drag_gy = 0.0
+        self._scroll_timer = QTimer(self, interval=30)
+        self._scroll_timer.timeout.connect(self._autoscroll)
         backend.queue_changed.connect(self._on_queue_event)
-
-    def _diag(self, tag):
-        """One line to the app log: the real geometry/GL state (read on B)."""
-        try:
-            app = ztos.App.current
-            layer = getattr(app, "gl", None) if app else None
-            rows = self._row_widgets
-            r0 = rows[0].geometry().getRect() if rows else None
-            print(f"ZUNEDIAG {tag}: win={self.window().width()}x{self.window().height()} "
-                  f"dpr={self.devicePixelRatioF():.2f} page={self.width()}x{self.height()} "
-                  f"view={self.viewport.width()}x{self.viewport.height()} "
-                  f"body={self.body.width()}x{self.body.height()} listn={self.list.count()} "
-                  f"rows={len(rows)} row0={r0} gl_on={self._gl_on} dirty={self._gl_dirty} "
-                  f"gl_top={getattr(self, '_gl_top', None)} gl_h={getattr(self, '_gl_h', None)} "
-                  f"layer={'y' if layer else 'n'} maxt={getattr(layer, 'max_texture', None) if layer else None}",
-                  flush=True)
-        except Exception as e:
-            print("ZUNEDIAG err", repr(e), flush=True)
 
     def shown(self):
         self._fill(backend.queue_items())
-        QTimer.singleShot(3000, lambda: self.isVisible() and self._diag("settled"))
 
     def _on_queue_event(self):
-        if not self.isVisible():
-            return
+        if not self.isVisible() or self._drag_row is not None:
+            return                                   # never rebuild under a finger
         items, position = backend.queue_items()
         sig = tuple((i.get("id"), i.get("title")) for i in items)
         if sig == self._sig:
@@ -71,7 +105,6 @@ class QueuePage(ztos.Page):
                     # big texture on every queue event (the squash/overlap on B)
                     row.redraw()
             return
-        self._diag("sig-change")
         self._fill((items, position))
 
     def _fill(self, q):
@@ -82,59 +115,88 @@ class QueuePage(ztos.Page):
         if not backend.live:
             from hub import Notice
             self.add(Notice(backend.demo_notice or "demo data"))
+        unplay = unplayable_ids()
         for i, it in enumerate(items):
             r = Row(rtitle(it), it.get("subtitle", ""), it.get("duration_ms", 0),
-                    accent=(i == position),
-                    on_tap=lambda i=i: backend.jump_to(i),
-                    on_hold=lambda i=i: self._start_drag(i))
-            r.installEventFilter(self)
+                    accent=(i == position), available=(it.get("id") not in unplay))
+            r._right = GRIP_W
+            # indices are looked up live: the order changes while dragging
+            r.tapped.connect(lambda r=r: backend.jump_to(self._row_widgets.index(r)))
+            r.held.connect(lambda r=r: self._row_menu(r))
+            grip = Grip(r)
+            grip.move(r.width() - GRIP_W, 0)
+            grip.grabbed.connect(lambda gy, r=r: self._drag_begin(r, gy))
+            grip.dragged.connect(self._drag_move)
+            grip.dropped.connect(self._drag_end)
+            r._grip = grip
+            r._qkey = (it.get("id"), it.get("title"))
             self._row_widgets.append(r)
             self.add(r)
-        self._diag("filled")
+
+    def _row_menu(self, row):
+        ztos.menu(self, [("remove from queue",
+                          lambda: (backend.remove_from_queue(self._row_widgets.index(row)), self.shown()))])
 
     # ---- drag to reorder ---------------------------------------------------
-    def _start_drag(self, index):
-        # long-press: enter reorder mode; let mouse moves reach the rows
-        # (the SDK finger filter would otherwise eat them as a scroll)
-        self._drag_from = index
-        self._drag_over = index
-        try:
-            ztos.App.current._finger.active = False
-        except Exception:
-            pass
+    def _drag_begin(self, row, gy):
+        self._stop()
+        self._gl_end()                  # live widget tree while rows move (no stale GL picture)
+        self._drag_row = row
+        self._drag_from = self._row_widgets.index(row)
+        self._drag_gy = gy
+        row._lift = True
+        row.redraw()
         ztos.haptic("tap")
+        self._scroll_timer.start()
 
-    def eventFilter(self, obj, event):
-        from PySide6.QtCore import QEvent
-        # NB: Qt can call eventFilter during QWidget.__init__, before our
-        # attributes exist — always getattr-guard here. And NEVER swallow the
-        # SDK's own events: Page.eventFilter turns the body's LayoutRequest
-        # into _fit() — without that call the body keeps the viewport's height
-        # and Qt squashes all the rows into it (the overlapping queue on B).
-        if getattr(self, "_drag_from", None) is not None:
-            if event.type() == QEvent.MouseMove:
-                y = obj.y() + event.position().y()
-                idx = max(0, min(len(self._row_widgets) - 1, int(y // 71)))
-                if idx != self._drag_over:
-                    self._drag_over = idx
-                    for i, r in enumerate(self._row_widgets):
-                        hl = (i == self._drag_over)
-                        if r._accent != hl:
-                            r._accent = hl
-                            r.redraw()      # no content_changed(): see _on_queue_event
-            elif event.type() == QEvent.MouseButtonRelease:
-                frm, to = self._drag_from, self._drag_over
-                self._drag_from = None
-                self._drag_over = None
-                try:
-                    ztos.App.current._finger.active = True
-                except Exception:
-                    pass
-                if frm is not None and to is not None and frm != to:
-                    backend.move_in_queue(frm, to)
-                    self.shown()
-                return False
-        return super().eventFilter(obj, event)
+    def _drag_move(self, gy):
+        self._drag_gy = gy
+        row = self._drag_row
+        if row is None:
+            return
+        y = self.body.mapFromGlobal(QPointF(0, gy).toPoint()).y()
+        others = [r for r in self._row_widgets if r is not row]
+        target = sum(1 for r in others if r.y() + r.height() / 2.0 < y)
+        if target != self._row_widgets.index(row):
+            base = self.list.indexOf(self._row_widgets[0])
+            self._row_widgets.remove(row)
+            self._row_widgets.insert(target, row)
+            self.list.removeWidget(row)
+            self.list.insertWidget(base + target, row)
+            ztos.haptic("tick")
+
+    def _autoscroll(self):
+        if self._drag_row is None:
+            self._scroll_timer.stop()
+            return
+        vy = self.viewport.mapFromGlobal(QPointF(0, self._drag_gy).toPoint()).y()
+        vh = self.viewport.height()
+        step = 0.0
+        if vy < self.EDGE:
+            step = -min(18.0, (self.EDGE - vy) * 0.4 + 3)
+        elif vy > vh - self.EDGE:
+            step = min(18.0, (vy - (vh - self.EDGE)) * 0.4 + 3)
+        if step:
+            self.scroll_to(self._scroll + step)
+            self._drag_move(self._drag_gy)           # rows moved under the finger
+
+    def _drag_end(self, gy):
+        row = self._drag_row
+        if row is None:
+            return
+        self._drag_move(gy)
+        self._scroll_timer.stop()
+        frm, to = self._drag_from, self._row_widgets.index(row)
+        self._drag_row = self._drag_from = None
+        row._lift = False
+        row.redraw()
+        if frm != to:
+            backend.move_in_queue(frm, to)
+            # keep our signature in step with the new local order: the daemon's
+            # queue event then matches and does not rebuild the page
+            self._sig = tuple(r._qkey for r in self._row_widgets)
+        for idx, r in enumerate(self._row_widgets):
+            r.redraw()
 
     def _clear(self):
         backend.clear_queue()
@@ -159,7 +221,7 @@ class SearchPage(ztos.Page):
         self._filter = st.get("search_filter", "all")
         if self._filter not in dict(FILTERS):
             self._filter = "all"
-        self._filter_btn = ztos.RoundButton(icons.path("more"), f"filter: {self._filter}",
+        self._filter_btn = CircleButton(icons.path("more"), f"filter: {self._filter}",
                                             self._filter_menu)
         self.bar(self._filter_btn)
 

@@ -74,6 +74,42 @@ def rtitle(r) -> str:
 
 VIEWS = ("artists", "albums", "songs", "playlists")
 
+# Songs the daemon found unplayable at runtime: a JSON array of catalog ids in
+# ~/.cache/slipmat/unplayable.json (read on B 10/11: ["1021729324", ...]).
+# Together with catalog_id == None they are the "not available" rows.
+_UNPLAYABLE = {"mtime": None, "ids": frozenset()}
+
+
+def unplayable_ids():
+    import json
+    path = os.path.join(os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache"),
+                        "slipmat", "unplayable.json")
+    try:
+        m = os.stat(path).st_mtime
+    except OSError:
+        _UNPLAYABLE.update(mtime=None, ids=frozenset())
+        return _UNPLAYABLE["ids"]
+    if m != _UNPLAYABLE["mtime"]:
+        try:
+            with open(path) as f:
+                _UNPLAYABLE.update(mtime=m, ids=frozenset(str(x) for x in json.load(f)))
+        except (OSError, ValueError):
+            _UNPLAYABLE.update(mtime=m, ids=frozenset())
+    return _UNPLAYABLE["ids"]
+
+
+def is_available(row) -> bool:
+    """False for a song that cannot be streamed: no catalog id, or the daemon
+    already learned it fails (unplayable.json). Non-song rows are available."""
+    if row.get("kind", "song") != "song":
+        return True
+    cid = row.get("catalogId") or row.get("catalog_id") or ""
+    if not cid:
+        # demo rows have no catalog ids at all: treat only live rows as unavailable
+        return not row.get("raw")
+    return cid not in unplayable_ids()
+
+
 # SortBy::for_view (slipmat-core/src/sort.rs:53-60): what each list can sort by.
 # songs also offers "added" (owner requirement): Apple sends no dateAdded for
 # library songs, so client.browse joins the albums' date_added (see there).
@@ -465,14 +501,20 @@ class Backend(QObject):
         ids = the CATALOG ids of all rows (library ids are dropped — a library
         id is not streamable), index = position among the sendable rows,
         start = "clicked". Returns (sent, reason-if-not)."""
-        ids = [r.get("catalogId") for r in rows if r.get("catalogId")]
+        ok = [is_available(r) and bool(r.get("catalogId")) for r in rows]
+        ids = [r.get("catalogId") for r, good in zip(rows, ok) if good]
         if not ids:
-            return False, "nothing here can be streamed (no catalog id)"
-        if not (rows[index].get("catalogId")):
-            return False, "this track cannot be streamed (catalog_id is null)"
-        idx = sum(1 for r in rows[:index] if r.get("catalogId"))
+            return False, "nothing here can be streamed"
+        note = None
+        if not ok[index]:
+            # tapped an unavailable row: start from the next available one
+            nxt = next((i for i in range(index + 1, len(rows)) if ok[i]), None)
+            if nxt is None:
+                return False, "this track is not available for streaming"
+            index, note = nxt, "this track is not available, playing the next one"
+        idx = sum(1 for g in ok[:index] if g)
         sent = self._send(self._client.play, ids, idx, "clicked") if self.live else False
-        return sent, None if sent else "not live"
+        return sent, note if sent else "not live"
 
     def enqueue(self, ids, next_=False):
         return self._send(self._client.enqueue, ids, next_) if self.live else False

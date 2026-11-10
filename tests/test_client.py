@@ -114,14 +114,34 @@ def main():
           sent and play_reqs and play_reqs[-1].get("ids") == ["c.fix1", "c.fix3"]
           and play_reqs[-1].get("index") == 0 and play_reqs[-1].get("start") == "clicked",
           str(play_reqs[-1] if play_reqs else None))
-    # tapped row without catalog_id (library-only, not streamable) -> reason, no play of library id
+    # tapped row without catalog_id (library-only, not streamable): plays the
+    # NEXT available row, with a note; the library id is never sent
     unplay_idx = next(i for i, r in enumerate(songs_rows) if not r.get("catalogId"))
-    sent2, reason2 = b.play_list(songs_rows, unplay_idx)   # Fixture Song Two has catalog_id null
-    check("unplayable row -> refused with reason, library id NOT sent",
-          not sent2 and reason2 and "cannot be streamed" in reason2, f"idx={unplay_idx} {reason2}")
-    reqs = [json.loads(l) for l in open(log)]
+    rot = [songs_rows[unplay_idx]] + [r for i, r in enumerate(songs_rows) if i != unplay_idx]
+    sent2, note2 = b.play_list(rot, 0)   # Fixture Song Two has catalog_id null, put first
+    pump(app, 0.5)
+    play_reqs = [json.loads(l) for l in open(log) if json.loads(l).get("req") == "play"]
+    check("unavailable row -> starts from next available + note, library id NOT sent",
+          sent2 and note2 and "not available" in note2 and play_reqs[-1].get("ids") == ["c.fix1", "c.fix3"]
+          and play_reqs[-1].get("index") == 0, f"idx={unplay_idx} {note2} {play_reqs[-1]}")
     check("no play req with library id i.fix2",
-          all("i.fix2" not in (r.get("ids") or []) for r in reqs if r.get("req") == "play"))
+          all("i.fix2" not in (r.get("ids") or []) for r in play_reqs))
+    # daemon-learned unplayable ids (unplayable.json) are filtered out of the play list
+    cdir = tempfile.mkdtemp()
+    os.makedirs(os.path.join(cdir, "slipmat"))
+    with open(os.path.join(cdir, "slipmat", "unplayable.json"), "w") as f:
+        json.dump(["c.fix3"], f)
+    os.environ["XDG_CACHE_HOME"] = cdir
+    check("is_available: id in unplayable.json is unavailable",
+          not client.is_available(next(r for r in songs_rows if r.get("catalogId") == "c.fix3"))
+          and client.is_available(next(r for r in songs_rows if r.get("catalogId") == "c.fix1"))
+          and not client.is_available(songs_rows[unplay_idx]))
+    sent3, _ = b.play_list(songs_rows, 0)
+    pump(app, 0.5)
+    play_reqs = [json.loads(l) for l in open(log) if json.loads(l).get("req") == "play"]
+    check("play list excludes unplayable.json ids", sent3 and play_reqs[-1].get("ids") == ["c.fix1"],
+          str(play_reqs[-1]))
+    os.environ.pop("XDG_CACHE_HOME")
 
     # writes go out on the wire (no response -> give the server thread a beat)
     b.write("favorite", "c.fix1")

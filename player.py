@@ -28,7 +28,7 @@ from PySide6.QtWidgets import QWidget
 
 from art import Artwork, local_art, image_for
 from client import backend, rtitle
-from widgets import draw_cover, cover_colors, fmt_ms
+from widgets import draw_cover, cover_colors, fmt_ms, CircleButton
 
 COVER = 105
 COVER_X, COVER_Y = 16, 22
@@ -236,7 +236,7 @@ class PlayerView(ztos.Entry):
                          ("play", lambda: backend.transport("playPause")),
                          ("next", lambda: backend.transport("next")),
                          ("more", self._open_options)):
-            b = ztos.RoundButton(icons.path(kind), on_tap=cb)
+            b = CircleButton(icons.path(kind), on_tap=cb)
             b.setParent(self)
             self.ctrl[kind] = b
         self._seek = PlayerSeek(on_seek=lambda s: backend.seek(s * 1000.0))

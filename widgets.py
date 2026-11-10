@@ -8,7 +8,7 @@ plain gradients, never placeholder text (A2/N1).
 import ztos
 import art as art_mod
 from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import QColor, QFontMetricsF, QLinearGradient, QPainter
+from PySide6.QtGui import QColor, QFontMetricsF, QLinearGradient, QPainter, QPen
 from PySide6.QtWidgets import QWidget
 
 ROW_H = 71          # 59 canvas
@@ -40,6 +40,19 @@ def draw_cover(p: QPainter, rect: QRectF, title: str):
 def fmt_ms(ms) -> str:
     s = int(max(0, ms) // 1000)
     return f"{s // 60}:{s % 60:02d}"
+
+
+class CircleButton(ztos.RoundButton):
+    """The SDK's RoundButton without the press "lean" on the GPU layer.
+
+    The lean (`_Pressable._lean_begin`) covers the WHOLE widget rectangle with
+    an opaque black quad (sdk __init__.py:_lean_quads) to hide the flat
+    button under the tilted copy, so on the app bar a square overlay appears
+    on press. Skipping the lean keeps the supported press feedback (the ring
+    fills with the accent, `_press_set`) and never touches the GL layer."""
+
+    def _lean_begin(self):
+        self._gl_lean = False
 
 
 class Thumb(QWidget):
@@ -78,12 +91,16 @@ class Row(ztos.Entry):
     cached: draw() only recomposes text when the data changes."""
 
     def __init__(self, title: str, subtitle: str = "", duration_ms: int = 0,
-                 on_tap=None, on_hold=None, accent: bool = False, art: str = ""):
+                 on_tap=None, on_hold=None, accent: bool = False, art: str = "",
+                 available: bool = True):
         super().__init__(title, "", on_tap, on_hold)
         self.setFixedHeight(ROW_H)
         self._subtitle = subtitle
         self._duration = duration_ms
         self._accent = accent
+        self._available = available
+        self._right = 0              # extra right padding (queue grip)
+        self._lift = False           # row being dragged: lighter background
         self._art = art or ""
         self._tx = THUMB + 12 if self._art else 0
         self._f_title = ztos._font(ztos.FONT_LIGHT, TITLE_PX)
@@ -104,17 +121,33 @@ class Row(ztos.Entry):
 
     def draw(self, p: QPainter):
         p.setRenderHints(QPainter.Antialiasing | QPainter.TextAntialiasing)
+        if self._lift:
+            p.fillRect(QRectF(-LIST_X, 0, self.width() + 2 * LIST_X, self.height()), QColor(255, 255, 255, 34))
+        if not self._available:
+            p.setOpacity(0.38)            # unavailable: whole row dimmed
         p.setPen(ztos.accent() if self._accent else QColor("white"))
         p.setFont(self._f_title)
         fm = QFontMetricsF(p.font())
-        p.drawText(QPointF(self._tx, 30), self._elided(fm, self._title, self.width() - self._tx - 70))
+        p.drawText(QPointF(self._tx, 30), self._elided(fm, self._title, self.width() - self._tx - 70 - self._right))
         p.setPen(QColor(255, 255, 255, 127))
         p.setFont(self._f_sub)
         fm2 = QFontMetricsF(p.font())
-        p.drawText(QPointF(self._tx, 58), self._elided(fm2, self._subtitle, self.width() - self._tx - 90))
-        if self._duration:
+        p.drawText(QPointF(self._tx, 58), self._elided(fm2, self._subtitle, self.width() - self._tx - 90 - self._right))
+        if not self._available:
+            # "not available" mark (circle with a slash) where the duration goes
+            p.setOpacity(0.7)
+            p.setPen(QPen(QColor("white"), 1.6))
+            cx, cy, r = self.width() - 11.0 - self._right, 50.0, 8.0
+            p.drawEllipse(QPointF(cx, cy), r, r)
+            p.drawLine(QPointF(cx - r * 0.7, cy + r * 0.7), QPointF(cx + r * 0.7, cy - r * 0.7))
+        elif self._duration:
             text = fmt_ms(self._duration)
-            p.drawText(QPointF(self.width() - fm2.horizontalAdvance(text) - 2, 58), text)
+            p.drawText(QPointF(self.width() - self._right - fm2.horizontalAdvance(text) - 2, 58), text)
+
+    def set_available(self, v: bool):
+        if v != self._available:
+            self._available = v
+            self.redraw()
 
 
 class Cover(ztos.Entry):

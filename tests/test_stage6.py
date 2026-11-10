@@ -17,7 +17,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ["ZTOS_MANIFEST"] = json.dumps({"id": "dev.oneplus2.zunehd", "name": "Zune HD"})
 os.environ["ZTOS_APP_ROOT"] = REPO
 
-from PySide6.QtCore import QEvent, QPointF, Qt
+from PySide6.QtCore import QEvent, QPoint, QPointF, Qt
 from PySide6.QtGui import QMouseEvent
 from PySide6.QtWidgets import QApplication
 
@@ -129,17 +129,27 @@ def main():
     check("accent moved to new position", q._row_widgets[1]._accent and not q._row_widgets[0]._accent)
     check("position-only queue event does NOT dirty the GL list picture",
           not q._gl_dirty, f"_gl_dirty={q._gl_dirty}")
-    # drag row 0 over row 1 -> moveInQueue(0, 1)
-    q._start_drag(0)
-    r1 = q._row_widgets[1]
-    q._gl_dirty = False
-    q.eventFilter(r1, QMouseEvent(QEvent.MouseMove, QPointF(10, 10), Qt.LeftButton, Qt.LeftButton, Qt.NoModifier))
+    # drag row 0's HANDLE below row 1 -> moveInQueue(0, 1). Real mouse events
+    # delivered to the grip (a QAbstractSlider, so the SDK finger filter leaves
+    # it alone): no long-press, no SDK internals.
+    grip0 = q._row_widgets[0]._grip
+    r0, r1 = q._row_widgets[0], q._row_widgets[1]
+
+    def ev(kind, gy, buttons=Qt.LeftButton):
+        loc = grip0.mapFromGlobal(QPoint(int(grip0.mapToGlobal(QPoint(22, 0)).x()), int(gy)))
+        e = QMouseEvent(kind, QPointF(loc), QPointF(grip0.mapToGlobal(QPointF(loc))), Qt.LeftButton,
+                        buttons, Qt.NoModifier)
+        QApplication.sendEvent(grip0, e)
+    top = grip0.mapToGlobal(QPoint(22, 0)).y()
+    ev(QEvent.MouseButtonPress, top + 30)
+    check("grip press starts a drag (page lifted the row)", q._drag_row is r0 and r0._lift)
+    ev(QEvent.MouseMove, top + 71 + 50)            # over the lower half of row 1
     pump(app, 0.2)
-    check("drag highlight does NOT dirty the GL list picture", not q._gl_dirty,
-          f"_gl_dirty={q._gl_dirty}")
-    check("drag computes target index", q._drag_over == 1, f"drag_over={q._drag_over}")
-    q.eventFilter(r1, QMouseEvent(QEvent.MouseButtonRelease, QPointF(10, 10), Qt.LeftButton, Qt.LeftButton, Qt.NoModifier))
+    check("live reorder: dragged row now second", q._row_widgets[1] is r0 and q._row_widgets[0] is r1,
+          str([r._title for r in q._row_widgets]))
+    ev(QEvent.MouseButtonRelease, top + 71 + 50, Qt.NoButton)
     pump(app, 0.5)
+    check("drag ended, lift cleared", q._drag_row is None and not r0._lift)
     reqs = [json.loads(l) for l in open(log)] if os.path.exists(log) else []
     check("drag reorder -> moveInQueue(0,1) on the wire",
           any(r.get("req") == "moveInQueue" and r.get("from") == 0 and r.get("to") == 1 for r in reqs),

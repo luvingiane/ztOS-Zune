@@ -15,8 +15,8 @@ from PySide6.QtCore import QPointF, QRectF, Qt, QTimer
 from PySide6.QtGui import QColor, QFontMetricsF, QPainter
 
 from art import Artwork, prewarm
-from client import backend, rtitle, SORTS, SORT_LABELS
-from widgets import Row, Cover, LIST_X, fmt_ms, ROW_H
+from client import backend, rtitle, is_available, SORTS, SORT_LABELS
+from widgets import Row, Cover, CircleButton, LIST_X, fmt_ms, ROW_H
 
 GRID_ART = 300       # artwork size requested for grid cells (cell is 104 logical)
 
@@ -158,7 +158,7 @@ class SongsPage(ListPage):
 
     def make_row(self, s, i):
         return Row(rtitle(s), s.get("subtitle", ""), s.get("durationMs", 0),
-                   art=s.get("artworkTemplate", ""),
+                   art=s.get("artworkTemplate", ""), available=is_available(s),
                    on_tap=lambda i=i: self._play(i),
                    on_hold=lambda s=s: self._menu(s))
 
@@ -169,6 +169,8 @@ class SongsPage(ListPage):
         if not sent:
             ztos.notify("cannot play", reason or "slipmatd not ready")
             return
+        if reason:
+            ztos.notify("unavailable", reason)
         self._app.push(player.NowPlaying(self._app))
 
     def _menu(self, s):
@@ -306,6 +308,7 @@ class DetailPage(ztos.Page):
             cur = (np.get("title") == rtitle(e) and np.get("artist") == e.get("artist", ""))
             self.add(Row(rtitle(e), e.get("subtitle", ""), e.get("durationMs", 0),
                          art=e.get("artworkTemplate", ""), accent=cur,
+                         available=is_available(e),
                          on_tap=lambda i=i: self._play_from(i)))
         prewarm([header] + entries, GRID_ART)
 
@@ -318,6 +321,8 @@ class DetailPage(ztos.Page):
         if not sent:
             ztos.notify("cannot play", reason or "slipmatd not ready")
             return
+        if reason:
+            ztos.notify("unavailable", reason)
         ztos.App.current.push(player.NowPlaying(ztos.App.current))
 
     def _header_block(self, header):
@@ -353,10 +358,10 @@ class DetailPage(ztos.Page):
         self.add(row)
         # action row: play / shuffle / queue / more (detail_page.rs header buttons)
         actions = self.round_buttons(
-            ztos.RoundButton(icons.path("play"), on_tap=self._play_all),
-            ztos.RoundButton(icons.path("shuffle"), on_tap=self._play_shuffled),
-            ztos.RoundButton(icons.path("queue"), on_tap=self._enqueue_all),
-            ztos.RoundButton(icons.path("more"), on_tap=self._more_menu))
+            CircleButton(icons.path("play"), on_tap=self._play_all),
+            CircleButton(icons.path("shuffle"), on_tap=self._play_shuffled),
+            CircleButton(icons.path("queue"), on_tap=self._enqueue_all),
+            CircleButton(icons.path("more"), on_tap=self._more_menu))
         self.space(4)
 
     def _play_all(self):
@@ -395,13 +400,13 @@ class MusicHub(ztos.Pivot):
                        ArtistsPage(app), screens.SettingsPage()]
         super().__init__(self._pages)
         self.turned.connect(self._sort_label)
-        self._sort_btn = ztos.RoundButton(icons.path("sort"), "sort", self._sort_menu)
+        self._sort_btn = CircleButton(icons.path("sort"), "sort", self._sort_menu)
         self.bar(self._sort_btn,
-                 ztos.RoundButton(icons.path("search"), "search",
+                 CircleButton(icons.path("search"), "search",
                                   lambda: app.push(screens.SearchPage())),
-                 ztos.RoundButton(icons.path("queue"), "queue",
+                 CircleButton(icons.path("queue"), "queue",
                                   lambda: app.push(screens.QueuePage())),
-                 ztos.RoundButton(icons.path("play"), "now playing",
+                 CircleButton(icons.path("play"), "now playing",
                                   lambda: app.push(player.NowPlaying(app))))
         backend.changed.connect(self._refill)
         self._sort_label(0)
