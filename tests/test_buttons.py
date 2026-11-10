@@ -37,6 +37,21 @@ plain = ztos.RoundButton(icons.path("play"), "x"); plain.setParent(host)
 QTest.mousePress(plain, Qt.LeftButton, Qt.NoModifier, QPoint(34, 26))
 if not calls:
     print("FAIL: control (plain RoundButton) did not start the lean - test is blind"); ok = False
+from widgets import Row
+pcalls = []
+ztos._Pressable._lean_begin = lambda self: pcalls.append(type(self).__name__)
+ctl = ztos.Entry("c", ""); ctl.setParent(host); ctl.resize(300, 71); ctl.move(0, 200); ctl.show()
+QTest.mousePress(ctl, Qt.LeftButton, Qt.NoModifier, QPoint(50, 30))
+if not pcalls:
+    print("FAIL: control (plain Entry) did not start the lean - row test is blind"); ok = False
+QTest.mouseRelease(ctl, Qt.LeftButton, Qt.NoModifier, QPoint(50, 30))
+pcalls.clear()
+rw = Row("t", "s"); rw.setParent(host); rw.resize(300, 71); rw.move(0, 100); rw.show()
+calls.clear()
+QTest.mousePress(rw, Qt.LeftButton, Qt.NoModifier, QPoint(50, 30))
+if pcalls or rw._gl_lean:
+    print("FAIL: list row starts the GL lean on press (31-quad frame)"); ok = False
+QTest.mouseRelease(rw, Qt.LeftButton, Qt.NoModifier, QPoint(50, 30))
 b._cache = object()
 b.set_glyph(icons.path("pause"))
 if b._cache is not None:

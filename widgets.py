@@ -163,6 +163,12 @@ class Row(ztos.Entry):
             text = fmt_ms(self._duration)
             p.drawText(QPointF(self.width() - self._right - fm2.horizontalAdvance(text) - 2, 58), text)
 
+    def _lean_begin(self):
+        # EXPERIMENT (B log 14:32): every touch-down starts the SDK's GL "lean"
+        # = a 31-quad frame, and exactly those frames fail with MESA
+        # "submit failed -28" (no failures in 8-quad frames). No lean on rows.
+        self._gl_lean = False
+
     def set_available(self, v: bool):
         if v != self._available:
             self._available = v
