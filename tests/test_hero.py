@@ -57,6 +57,12 @@ def main():
     f.add("http://x.invalid/hero/{w}x{h}bb.jpg", 768, priority=True)
     if f._queue[0][1] != 768 or len(f._queue) != 4 or len(f._threads) < 2:
         fails.append(f"priority/pool broken: {f._queue} threads={len(f._threads)}")
+    art.NOIMG = True
+    if art.local_art(os.path.join(REPO, "icon.png")) is not None:
+        fails.append("NOIMG: local_art still returns files")
+    art.NOIMG = False
+    if art.local_art(os.path.join(REPO, "icon.png")) is None:
+        fails.append("local_art broken without NOIMG")
     print("ALL PASS" if not fails else "FAILED: " + "; ".join(fails))
     return 1 if fails else 0
 

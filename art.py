@@ -40,13 +40,15 @@ def cache_path(template: str, size: int) -> str:
     return os.path.join(CACHE_DIR, f"{_fnv1a(template)}-{size}.jpg")
 
 
+NOIMG = bool(os.environ.get("ZUNE_NOIMG"))   # perf experiment: no artwork at all (gradients only)
+
 stale = set()     # URLs whose fetch failed (signed ones expire -> re-browse)
 
 
 def local_art(path_or_template, size: int = 512):
     """A local file for this artwork if we already have it (no network).
     Handles both template URLs ({w}x{h}) and plain/signed URLs."""
-    if not path_or_template:
+    if not path_or_template or NOIMG:
         return None
     path_or_template = str(path_or_template)
     if os.path.isabs(path_or_template) and os.path.exists(path_or_template):
@@ -135,7 +137,7 @@ class _Fetcher(QObject):
 
     def add(self, template, size, priority=False):
         template = str(template)
-        if not template or not template.startswith("http"):
+        if NOIMG or not template or not template.startswith("http"):
             return
         p = cache_path(template, size)
         if os.path.exists(p):
