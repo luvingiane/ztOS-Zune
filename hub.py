@@ -236,6 +236,7 @@ class AlbumGrid(ztos.Entry):
             col, row = i % 3, i // 3
             w = Artwork(self.CELL_W - 4, rtitle(al), al.get("artworkTemplate", ""), GRID_ART)
             w.setParent(self)
+            w.setAttribute(Qt.WA_TransparentForMouseEvents)   # the tap must reach the grid, not the cover
             w.move(col * self.CELL_W + 2, row * self.CELL_H + 2)
             w.show()
             self._cells.append(w)

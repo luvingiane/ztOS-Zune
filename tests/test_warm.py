@@ -23,5 +23,16 @@ if widgets.warm_cache(grid) or getattr(grid, "_cache", None) is not None:
     print("FAIL: tall grid got a cache pixmap (%d px high)" % grid.height()); ok = False
 if not widgets.warm_cache(row):
     print("FAIL: a normal row is no longer warmed"); ok = False
+from PySide6.QtCore import Qt, QPoint
+from PySide6.QtTest import QTest
+from PySide6.QtWidgets import QWidget
+host = QWidget(); host.resize(360, 640)
+got = []
+g2 = AlbumGrid([{"title": f"a{i}", "id": str(i)} for i in range(9)], on_tap=lambda al: got.append(al["id"]))
+g2.setParent(host); g2.resize(360, g2.height()); g2.build_cells(); host.show()
+w = g2.childAt(60, 60)
+QTest.mouseClick(w or g2, Qt.LeftButton, Qt.NoModifier, QPoint(10, 10))
+if got != ["0"]:
+    print("FAIL: tap on a grid cover did not open the album", got, type(w).__name__); ok = False
 print("PASS" if ok else "FAILED")
 sys.exit(0 if ok else 1)
