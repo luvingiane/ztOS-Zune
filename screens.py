@@ -378,6 +378,11 @@ class SettingsPage(ztos.Page):
                     on_change=lambda on: (st.__setitem__("notify_track", on), st.save()))
         self.toggle("Sfondo sfocato nel player", on=bool(st.get("blur_bg", True)),
                     on_change=lambda on: (st.__setitem__("blur_bg", on), st.save()))
+        import art as art_mod
+        self.toggle("Copertine nelle liste", on=bool(st.get("covers", True)),
+                    on_change=lambda on: (st.__setitem__("covers", on), st.save(), art_mod.set_covers(on)))
+        self.toggle("Album in lista (senza griglia)", on=bool(st.get("albums_list", False)),
+                    on_change=lambda on: (st.__setitem__("albums_list", on), st.save()))
         self.entry("about", "", self._about)
         backend.stage_changed.connect(lambda _s: self._refresh_stage())
         backend.error.connect(lambda e: ztos.notify("slipmatd", e))

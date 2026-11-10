@@ -30,7 +30,7 @@ def cover_colors(text: str):
 
 
 def draw_cover(p: QPainter, rect: QRectF, title: str):
-    if art_mod.NOIMG:                       # perf experiment: flat grey, no gradient
+    if art_mod.noimg():                     # covers off: flat grey, no gradient
         p.fillRect(rect, QColor(38, 38, 38))
         return
     c1, c2 = cover_colors(title)
@@ -120,7 +120,7 @@ class Row(ztos.Entry):
         self._available = available
         self._right = 0              # extra right padding (queue grip)
         self._lift = False           # row being dragged: lighter background
-        self._art = art or ""
+        self._art = "" if (art and art_mod.blocked(art)) else (art or "")   # covers off: no thumb box at all
         self._tx = THUMB + 12 if self._art else 0
         self._f_title = ztos._font(ztos.FONT_LIGHT, TITLE_PX)
         self._f_sub = ztos._font(ztos.FONT_REGULAR, SUB_PX)

@@ -51,8 +51,29 @@ def allow(*items):
             ALLOW.add(str(it))
 
 
+_covers = None          # Settings "covers" toggle, read once (set_covers() updates it)
+
+
+def set_covers(on: bool):
+    global _covers
+    _covers = bool(on)
+
+
+def noimg() -> bool:
+    """No artwork at all: env ZUNE_NOIMG=1 or Settings "Copertine" off."""
+    global _covers
+    if NOIMG:
+        return True
+    if _covers is None:
+        try:
+            _covers = bool(ztos.store("zunehd").get("covers", True))
+        except Exception:
+            _covers = True
+    return not _covers
+
+
 def blocked(key) -> bool:
-    return NOIMG and str(key) not in ALLOW
+    return noimg() and str(key) not in ALLOW
 
 stale = set()     # URLs whose fetch failed (signed ones expire -> re-browse)
 

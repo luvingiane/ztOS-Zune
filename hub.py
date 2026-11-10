@@ -263,6 +263,22 @@ class AlbumGrid(ztos.Entry):
             self._on_tap(self._albums[i])
 
 
+def albums_as_list() -> bool:
+    """Albums as rows instead of the cover grid: Settings "Album in lista",
+    or forced when covers are off (a grid of grey squares is useless)."""
+    import art as _a
+    try:
+        pref = bool(ztos.store("zunehd").get("albums_list", False))
+    except Exception:
+        pref = False
+    return pref or _a.noimg()
+
+
+def album_row(al, on_open):
+    return Row(rtitle(al), al.get("subtitle", ""), art=al.get("artworkTemplate", ""),
+               on_tap=lambda al=al: on_open(al))
+
+
 class AlbumsPage(ListPage):
     view = "albums"
 
@@ -271,17 +287,22 @@ class AlbumsPage(ListPage):
         self._app = app
         self._grid = None
 
+    def _open(self, al):
+        self._app.push(DetailPage(al.get("pageKind", "album"), al.get("id", ""), rtitle(al)))
+
     def make_row(self, al, index):
-        return AlbumGrid([al], on_tap=lambda al=al: None)   # albums use the grid below
+        return album_row(al, self._open)          # list mode (see albums_as_list)
 
     def _on_rows(self, rows):
+        if albums_as_list():
+            self._grid = None
+            return super()._on_rows(rows)
         if not self.isVisible():
             return
         self.clear()
         if not backend.live:
             self.add(Notice(backend.demo_notice or "demo data"))
-        self._grid = AlbumGrid(rows, on_tap=lambda al: self._app.push(
-            DetailPage(al.get("pageKind", "album"), al.get("id", ""), rtitle(al))))
+        self._grid = AlbumGrid(rows, on_tap=self._open)
         self.add(self._grid)
         self._grid.build_cells()
         prewarm(rows, GRID_ART)
@@ -299,6 +320,9 @@ class Hero(ztos.Entry):
     def __init__(self, name: str, sub: str, template: str, height: int = 250,
                  top_anchor: bool = True, image=None):
         super().__init__("", "")
+        import art as _a
+        if image is None and (not template or _a.blocked(template)):
+            height = 130                        # covers off: a slim title banner, no grey slab
         self._name, self._sub, self._t = name, sub, template or ""
         self._top_anchor = top_anchor
         self._img = image
@@ -606,9 +630,13 @@ class DetailPage(ztos.Page):
         for text, group in (("albums", full), ("singles & EPs", small)):
             if group:
                 label(text)
-                grid = AlbumGrid(group, on_tap=open_album)
-                put(grid)
-                grid.build_cells()
+                if albums_as_list():
+                    for al in group:
+                        put(album_row(al, open_album))
+                else:
+                    grid = AlbumGrid(group, on_tap=open_album)
+                    put(grid)
+                    grid.build_cells()
         prewarm(albums, GRID_ART)
 
     def _play_from(self, i):

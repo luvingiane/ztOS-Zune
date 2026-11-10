@@ -77,6 +77,19 @@ def main():
     art.ALLOW.clear()
     if art.local_art(os.path.join(REPO, "icon.png")) is None:
         fails.append("local_art broken without NOIMG")
+    import widgets
+    art.set_covers(False)
+    r = widgets.Row("t", "s", art="http://x.invalid/c/{w}x{h}bb.jpg")
+    if r._tx != 0 or r.findChildren(widgets.Thumb):
+        fails.append("covers off: row still has a thumb box")
+    if not hub.albums_as_list():
+        fails.append("covers off: albums should be a list")
+    art.set_covers(True)
+    r2 = widgets.Row("t", "s", art="http://x.invalid/c/{w}x{h}bb.jpg")
+    if not r2.findChildren(widgets.Thumb):
+        fails.append("covers on: row lost its thumb")
+    if hub.albums_as_list():
+        fails.append("covers on, setting off: albums should be a grid")
     print("ALL PASS" if not fails else "FAILED: " + "; ".join(fails))
     return 1 if fails else 0
 
