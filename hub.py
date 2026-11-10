@@ -13,6 +13,7 @@ import screens
 import player
 from PySide6.QtCore import QPointF, QRectF, Qt, QTimer
 from PySide6.QtGui import QColor, QFontMetricsF, QPainter
+from PySide6.QtWidgets import QWidget
 
 from art import Artwork, prewarm
 from client import backend, rtitle, is_available, SORTS, SORT_LABELS
@@ -283,26 +284,44 @@ class AlbumsPage(ListPage):
         prewarm(rows, GRID_ART)
 
 
-class ArtistHero(ztos.Entry):
-    """Top of an artist page: the artist picture cropped to fill the width,
-    darkened toward the bottom, name large over it (like the Apple Music
-    profile: picture, name, then play/shuffle). The picture arrives async."""
+class Hero(ztos.Entry):
+    """Full-bleed banner at the top of an artist / album / playlist page: the
+    picture edge to edge (like the Apple Music profile), darkened toward the
+    bottom, name large over it, then a small grey line. It is a child of the
+    page BODY (not of the list, whose 16 px margins left black bars at the
+    sides) and `HeroSlot` keeps it glued to its place in the list."""
 
-    H = 250
+    ART = 768            # 360 logical x DPR 3 = 1080 px wide on the phone
 
-    def __init__(self, name: str, genres: str, template: str):
+    def __init__(self, name: str, sub: str, template: str, height: int = 250,
+                 top_anchor: bool = True, image=None):
         super().__init__("", "")
-        self._name, self._genres, self._t = name, genres, template or ""
-        self._img = None
-        self.setFixedHeight(self.H)
-        if self._t:
-            import art as art_mod
-            p = art_mod.local_art(self._t, 512)
-            if p:
-                self._img = art_mod.image_for(p)
-            else:
-                art_mod.add_listener(self._on_art, self._t)
-                art_mod._fetcher.add(self._t, 512)
+        self._name, self._sub, self._t = name, sub, template or ""
+        self._top_anchor = top_anchor
+        self._img = image
+        self.H = height
+        self.setFixedHeight(height)
+        self.setAttribute(Qt.WA_TransparentForMouseEvents)
+        if image is None:
+            self.set_template(self._t)
+
+    def set_template(self, template: str):
+        import art as art_mod
+        self._t = template or ""
+        if not self._t:
+            return
+        p = art_mod.local_art(self._t, self.ART)
+        if p:
+            self._img = art_mod.image_for(p)
+            self.redraw()
+        else:
+            art_mod.add_listener(self._on_art, self._t)
+            art_mod._fetcher.add(self._t, self.ART)
+
+    def set_sub(self, sub: str):
+        if sub and sub != self._sub:
+            self._sub = sub
+            self.redraw()
 
     def _on_art(self, template, path, ok):
         if ok and template == self._t:
@@ -320,7 +339,8 @@ class ArtistHero(ztos.Entry):
         if self._img is not None and not self._img.isNull():
             s = max(w / self._img.width(), h / self._img.height())
             iw, ih = self._img.width() * s, self._img.height() * s
-            p.drawImage(QRectF((w - iw) / 2, 0, iw, ih), self._img)      # top-anchored crop (faces)
+            y = 0 if self._top_anchor else (h - ih) / 2          # faces: top; covers: centre
+            p.drawImage(QRectF((w - iw) / 2, y, iw, ih), self._img)
         else:
             from widgets import draw_cover
             draw_cover(p, QRectF(0, 0, w, h), self._name)
@@ -328,14 +348,55 @@ class ArtistHero(ztos.Entry):
         g.setColorAt(0.0, QColor(0, 0, 0, 0))
         g.setColorAt(1.0, QColor(0, 0, 0, 235))
         p.fillRect(QRectF(0, 0, w, h), g)
+        x = float(ztos.MARGIN)
         p.setPen(QColor("white"))
         p.setFont(ztos._font(ztos.FONT_LIGHT, 38))
         fm = QFontMetricsF(p.font())
-        p.drawText(QPointF(0, h - 30), fm.elidedText(self._name, Qt.ElideRight, w))
-        if self._genres:
+        p.drawText(QPointF(x, h - 30), fm.elidedText(self._name, Qt.ElideRight, w - 2 * x))
+        if self._sub:
             p.setPen(QColor(255, 255, 255, 170))
             p.setFont(ztos._font(ztos.FONT_REGULAR, 14))
-            p.drawText(QPointF(1, h - 9), self._genres)
+            fm = QFontMetricsF(p.font())
+            p.drawText(QPointF(x + 1, h - 9), fm.elidedText(self._sub, Qt.ElideRight, w - 2 * x))
+
+
+class HeroSlot(QWidget):
+    """Placeholder in the page list that reserves the banner's height; the
+    Hero itself lives in the page body at x=0 across the full width."""
+
+    def __init__(self, hero: Hero, body):
+        super().__init__()
+        self.hero = hero
+        self.setFixedHeight(hero.H)
+        hero.setParent(body)
+        hero.show()
+        self._body = body
+        self.destroyed.connect(lambda *_: hero.deleteLater())
+
+    def _place(self):
+        if self.hero is None:
+            return
+        self.hero.setGeometry(0, self.y(), self._body.width(), self.hero.H)
+        self.hero.lower()
+
+    def moveEvent(self, e):
+        super().moveEvent(e)
+        self._place()
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        self._place()
+
+    def showEvent(self, e):
+        super().showEvent(e)
+        self._place()
+
+
+def add_hero(page, hero: Hero):
+    """Put a full-bleed `Hero` at the current end of `page`'s list."""
+    slot = HeroSlot(hero, page.body)
+    page.add(slot)
+    return hero
 
 
 def _split_discography(albums):
@@ -434,8 +495,8 @@ class DetailPage(ztos.Page):
         self.header.setVisible(False)            # the hero carries the name
         self._entries = []                       # top songs, filled async
         self._alb_widgets = []
-        self.add(ArtistHero(name, header.get("subtitle", "") or header.get("genres", ""),
-                            header.get("artworkTemplate", "")))
+        self._hero = add_hero(self, Hero(name, header.get("subtitle", "") or header.get("genres", ""),
+                                         header.get("artworkTemplate", "")))
         self.space(6)
         self.round_buttons(
             CircleButton(icons.path("play"), on_tap=self._play_all),
@@ -474,10 +535,25 @@ class DetailPage(ztos.Page):
         prewarm(songs, GRID_ART)
 
     def _on_catalog_artist(self, name, rows):
-        art = next((r for r in rows if r.get("kind") == "artist" and rtitle(r).lower() == name.lower()), None)
-        if art is not None:
-            backend.open_page_async(art.get("pageKind", "artist"), art.get("id", ""),
-                                    lambda hdr, ents: self._on_catalog_albums(ents))
+        """Library artist -> upgrade to the full catalog profile: the artist
+        picture + genres for the banner and the whole discography."""
+        if not self.isVisible():
+            return
+        artists = [r for r in rows if r.get("kind") == "artist"]
+        key = name.strip().casefold()
+        art = next((r for r in artists if rtitle(r).strip().casefold() == key), None)
+        if art is None:
+            art = next((r for r in artists if key in rtitle(r).strip().casefold()
+                        or rtitle(r).strip().casefold() in key), None)
+        if art is None:
+            return
+        hero = getattr(self, "_hero", None)
+        if hero is not None:
+            if art.get("artworkTemplate") and art.get("artworkTemplate") != hero._t:
+                hero.set_template(art["artworkTemplate"])
+            hero.set_sub(art.get("subtitle", "") or art.get("genres", ""))
+        backend.open_page_async(art.get("pageKind", "artist"), art.get("id", ""),
+                                lambda hdr, ents: self._on_catalog_albums(ents))
 
     def _on_catalog_albums(self, entries):
         if self.isVisible():
@@ -501,7 +577,7 @@ class DetailPage(ztos.Page):
             self._alb_widgets.append(w)
 
         def label(text):
-            from PySide6.QtWidgets import QLabel
+            from PySide6.QtWidgets import QWidget, QLabel
             lab = QLabel(text)
             lab.setFont(ztos._font(ztos.FONT_REGULAR, 13))
             lab.setStyleSheet("color: rgba(255,255,255,0.6); padding-top: 14px; padding-bottom: 4px;")
@@ -535,41 +611,24 @@ class DetailPage(ztos.Page):
         ztos.App.current.push(player.NowPlaying(ztos.App.current))
 
     def _header_block(self, header, n_others=0):
-        from PySide6.QtWidgets import QWidget, QHBoxLayout
-        row = QWidget()
-        lay = QHBoxLayout(row)
-        lay.setContentsMargins(0, 10, 0, 10)
-        lay.setSpacing(14)
-        cover = Artwork(140, rtitle(header), header.get("artworkTemplate", ""), 300)
-        if getattr(self, "_mosaic", None) is not None:
-            cover._img = self._mosaic
-        lay.addWidget(cover)
-        texts = QWidget()
-        from PySide6.QtWidgets import QVBoxLayout, QLabel
-        tv = QVBoxLayout(texts)
-        tv.setContentsMargins(0, 0, 0, 0)
-        name = QLabel(rtitle(header))
-        name.setFont(ztos._font(ztos.FONT_LIGHT, 30))
-        name.setStyleSheet("color: white;")
-        sub = QLabel(header.get("subtitle", ""))
-        sub.setFont(ztos._font(ztos.FONT_REGULAR, 15))
-        sub.setStyleSheet("color: rgba(255,255,255,0.6);")
+        """Album / playlist banner: the cover edge to edge with the title over
+        it (same look as the artist profile), then the action row."""
         n = len(self._entries)
         total = sum(e.get("durationMs", 0) for e in self._entries)
-        meta = QLabel(f"{n} tracks · {fmt_ms(total)}" if n else (f"{n_others} albums" if n_others else ""))
-        meta.setFont(ztos._font(ztos.FONT_REGULAR, 13))
-        meta.setStyleSheet("color: rgba(255,255,255,0.45);")
-        tv.addWidget(name)
-        tv.addWidget(sub)
-        tv.addWidget(meta)
-        tv.addStretch(1)
-        lay.addWidget(texts, 1)
-        self.add(row)
-        # action row: play / shuffle / queue / more (detail_page.rs header buttons)
-        if not n:                       # artist page: albums only, nothing to play/shuffle
+        bits = [header.get("subtitle", "")]
+        if n:
+            bits.append(f"{n} track{'' if n == 1 else 's'} · {fmt_ms(total)}")
+        elif n_others:
+            bits.append(f"{n_others} albums")
+        self.header.setVisible(False)            # the banner carries the name
+        self._hero = add_hero(self, Hero(rtitle(header), "  ·  ".join(b for b in bits if b),
+                                         header.get("artworkTemplate", ""), height=300,
+                                         top_anchor=False, image=getattr(self, "_mosaic", None)))
+        self.space(6)
+        if not n:                       # nothing to play/shuffle
             self.space(4)
             return
-        actions = self.round_buttons(
+        self.round_buttons(
             CircleButton(icons.path("play"), on_tap=self._play_all),
             CircleButton(icons.path("shuffle"), on_tap=self._play_shuffled),
             CircleButton(icons.path("queue"), on_tap=self._enqueue_all),
